@@ -1,4 +1,5 @@
 import java.nio.ByteBuffer
+import java.util.*
 
 private val threadLocalBuffer = ThreadLocal.withInitial { ByteBuffer.allocateDirect(9) }
 
@@ -104,3 +105,9 @@ val Char.varIntSize get() = code.varIntSize
 
 fun Float.varIntSize(min: Float, max: Float) = ((this - min)/max).toULong().varIntSize
 fun Double.varIntSize(min: Double, max: Double) = ((this - min)/max).toULong().varIntSize
+
+
+operator fun UUID.plus(value: ULong): UUID {
+    val lsb = leastSignificantBits.toULong() + value
+    return UUID(if (lsb < leastSignificantBits.toULong()) mostSignificantBits + 1L else mostSignificantBits, lsb.toLong())
+}

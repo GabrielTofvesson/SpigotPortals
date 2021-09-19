@@ -1,7 +1,10 @@
 import org.bukkit.Location
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.event.EventHandler
+import org.bukkit.event.HandlerList
+import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.plugin.Plugin
 import java.util.*
 import kotlin.collections.ArrayList
 
@@ -10,10 +13,55 @@ private const val PATH_WORLDS = "worlds"
 private const val PATH_PORTALS = "portals"
 
 
-class PortalManager(private val data: ConfigurationSection, private val config: () -> ConfigurationSection) {
+class PortalManager(private val data: ConfigurationSection, private val config: () -> ConfigurationSection): Listener {
     private val players = PlayerMapper(data, PATH_PLAYERS)
     private val worlds = WorldMapper(data, PATH_WORLDS)
-    private var portals = SortedList.create(comparator = PORTAL_COMPARATOR)
+    private var portals = MultiSortedList(ArrayList(), PORTAL_LOCATION_COMPARATOR, PORTAL_UID_COMPARATOR)
+
+    // Make UUIDs as "sequential" as possible
+    private var nextUUIDUsed = false
+    private var nextUUID = UUID(0, 0)
+        get() {
+            // If currently held value guaranteed to be unused, just return it
+            if (!nextUUIDUsed) {
+                nextUUIDUsed = true
+                return field
+            }
+
+            // Compute next available uuid
+            var lsb = field.leastSignificantBits.toULong()
+            var msb = field.mostSignificantBits.toULong()
+
+            // Start sequential search at the resulting index if it is populated
+            val index = portals.binSearch(PORTAL_UID_COMPARATOR) {
+                compareValues(
+                    { msb } to { it.id.mostSignificantBits.toULong() },
+                    { lsb } to { it.id.leastSignificantBits.toULong() }
+                )
+            }
+
+            if (index >= 0) {
+                // Increment 128-bit value
+                if (++lsb == 0UL)
+                    ++msb
+
+                for (i in index until portals.size) {
+                    val find = portals.get(index, PORTAL_UID_COMPARATOR).id
+
+                    // Found a gap in the UUIDs
+                    if (find.mostSignificantBits.toULong() != msb || find.leastSignificantBits.toULong() != lsb)
+                        break
+                    else if (++lsb == 0UL)
+                        ++msb
+                }
+            }
+
+            // Save result and mark as used
+            field = UUID(msb.toLong(), lsb.toLong())
+            nextUUIDUsed = true
+
+            return field
+        }
 
     fun reload() {
         players.reload()
@@ -21,9 +69,22 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
         val portalList = ArrayList<Portal>()
         data.getStringList(PATH_PORTALS).forEach {
-            portalList += readCompressedPortal(it, worlds::getValue, players::getValue) ?: return@forEach
+            val portal = readCompressedPortal(it, worlds::getValue, players::getValue) ?: return@forEach
+            portalList += portal
+
+            if (portal.id >= nextUUID)
+                nextUUID = portal.id + 1UL
         }
-        portals = SortedList.create(PORTAL_COMPARATOR, portalList)
+        portals = MultiSortedList(portalList, PORTAL_LOCATION_COMPARATOR, PORTAL_UID_COMPARATOR)
+
+        if(portals.isEmpty()) nextUUID = UUID(0, 0)
+        else {
+            nextUUID = portals.get(0, PORTAL_UID_COMPARATOR).id + 1UL
+
+            // Compute next UUID
+            nextUUID
+            nextUUIDUsed = false
+        }
     }
 
     fun save() {
@@ -32,6 +93,13 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         data.set(PATH_PORTALS, portals.map { it.toCompressedString(worlds::getIndex, players::getIndex) })
     }
 
+    fun onEnable(plugin: Plugin) {
+        plugin.server.pluginManager.registerEvents(this, plugin)
+    }
+
+    fun onDisable() {
+        HandlerList.unregisterAll(this)
+    }
 
     @EventHandler
     fun onPlayerMove(moveEvent: PlayerMoveEvent) {

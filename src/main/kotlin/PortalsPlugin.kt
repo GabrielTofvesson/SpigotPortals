@@ -10,12 +10,23 @@ class PortalsPlugin: JavaPlugin() {
     override fun onEnable() {
         super.onEnable()
 
+        reloadConfig()
+
+        portalManager.onEnable(this)
+    }
+
+    override fun reloadConfig() {
+        super.reloadConfig()
         saveDefaultConfig()
         data.load()
+
+        portalManager.reload()
     }
 
     override fun onDisable() {
         super.onDisable()
+
+        portalManager.onDisable()
 
         data.save()
         saveConfig()

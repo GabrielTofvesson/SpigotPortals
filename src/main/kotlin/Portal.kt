@@ -10,7 +10,12 @@ import kotlin.experimental.or
 
 private val PLAYER_COMPARATOR = Comparator<OfflinePlayer> { a, b -> a.uniqueId.compareTo(b.uniqueId) }
 val LOCATION_COMPARATOR = Comparator<Location> { a, b -> a.compareByOrder(b, { world!!.uid }, Location::getBlockX, Location::getBlockY, Location::getBlockZ) }
-val PORTAL_COMPARATOR = Comparator<Portal> { a, b -> a.compareByOrder(b, { world.uid }, Portal::x, Portal::y, Portal::z, Portal::id) }
+
+// An owner cannot place two portals on the same block, implying that this comparator defines a partial order
+val PORTAL_LOCATION_COMPARATOR = Comparator<Portal> { a, b -> a.compareByOrder(b, { world.uid }, Portal::x, Portal::y, Portal::z, { owner.uniqueId }) }
+
+// IDs are unique, so this comparator inherently defines a partial order
+val PORTAL_UID_COMPARATOR = Comparator<Portal> { a, b -> a.id.compareTo(b.id) }
 
 
 private val threadLocalInputBuffer = ThreadLocal.withInitial { ReallocatingBuffer(ByteBuffer.allocate(96)) }
@@ -188,9 +193,9 @@ fun readCompressedPortal(
         },
         if (PortalFlag.LINKED.isFlagSet(flags)) UUID(inputBuffer.long, inputBuffer.long)
         else null,
-        if (PortalFlag.NO_EXCLUSIONS.isFlagSet(flags)) SortedList.create(comparator = PLAYER_COMPARATOR)
+        if (PortalFlag.NO_EXCLUSIONS.isFlagSet(flags)) SortedList(comparator = PLAYER_COMPARATOR)
         else run {
-            val collect = SortedList.create(comparator = PLAYER_COMPARATOR)
+            val collect = SortedList(comparator = PLAYER_COMPARATOR)
             while (inputBuffer.position < dataLen)
                 collect += playerMapper(inputBuffer.packedUInt) ?: continue
             return@run collect

@@ -1,24 +1,15 @@
 import java.util.*
+import kotlin.collections.ArrayList
 
-class SortedList<E> private constructor(
-    private val underlying: MutableList<E>,
-    private val comparator: Comparator<in E>
+open class SortedList<E> constructor(
+    private val underlying: MutableList<E> = ArrayList(),
+    protected val comparator: Comparator<in E>
 ): MutableList<E> by underlying {
-
     companion object {
-        fun <T> create(
-            type: Class<T>,
-            underlying: MutableList<T>,
-            comparator: Comparator<in T>
-        ) = SortedList(Collections.checkedList(underlying, type), comparator)
-
-        inline fun <reified T: Comparable<T>> create(
+        fun <T: Comparable<T>> ofComparable(
             underlying: MutableList<T> = ArrayList(),
             comparator: Comparator<T> = Comparator { a, b -> a.compareTo(b) }
-        ) = create(T::class.java, underlying, comparator)
-
-        inline fun <reified T> create(comparator: Comparator<T>, underlying: MutableList<T> = ArrayList()) =
-            create(T::class.java, underlying, comparator)
+        ) = SortedList(underlying, comparator)
     }
 
     init {
@@ -29,29 +20,23 @@ class SortedList<E> private constructor(
     override fun add(element: E): Boolean {
         val index = underlying.binarySearch(element, comparator)
 
-        if (index < 0)
-            underlying.add(-(index + 1), element)
-        else
-            underlying[index] = element
+        underlying.add(if (index < 0) -(index + 1) else index, element)
 
-        return index < 0
+        return true
     }
 
-    override fun add(index: Int, element: E) =
-        throw UnsupportedOperationException("Cannot insert at index for sorted list")
+    override fun add(index: Int, element: E) {
+        add(element)
+    }
 
     override fun addAll(elements: Collection<E>): Boolean {
-        var result = false
-
         for (element in elements)
-            result = add(element) || result
+            add(element)
 
-        return result
+        return elements.isNotEmpty()
     }
 
-    override fun addAll(index: Int, elements: Collection<E>) =
-        throw UnsupportedOperationException("Cannot insert at index for sorted list")
-
+    override fun addAll(index: Int, elements: Collection<E>) = addAll(elements)
     override fun contains(element: E) = underlying.binarySearch(element, comparator) >= 0
 
     override fun containsAll(elements: Collection<E>): Boolean {
@@ -73,9 +58,7 @@ class SortedList<E> private constructor(
         return false
     }
 
-    override fun removeAt(index: Int) =
-        underlying.removeAt(index)
-
+    override fun removeAt(index: Int) = underlying.removeAt(index)
     override fun removeAll(elements: Collection<E>): Boolean {
         var result = false
 
