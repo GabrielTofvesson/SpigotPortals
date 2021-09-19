@@ -4,8 +4,6 @@ import org.bukkit.World
 import org.bukkit.entity.Player
 import java.nio.ByteBuffer
 import java.util.*
-import kotlin.Comparator
-import kotlin.collections.ArrayList
 import kotlin.experimental.and
 import kotlin.experimental.inv
 import kotlin.experimental.or
@@ -17,24 +15,6 @@ val PORTAL_COMPARATOR = Comparator<Portal> { a, b -> a.compareByOrder(b, { world
 
 private val threadLocalInputBuffer = ThreadLocal.withInitial { ReallocatingBuffer(ByteBuffer.allocate(96)) }
 private val threadLocalOutputBuffer = ThreadLocal.withInitial { ReallocatingBuffer(ByteBuffer.allocate(96)) }
-
-private val method_encode0 = run {
-    val method = Base64::class.java.getDeclaredMethod(
-        "encode0",
-        ByteArray::class.java,
-        Int::class.java,
-        Int::class.java,
-        ByteArray::class.java
-    )
-    method.isAccessible = true
-    return@run method
-}
-
-private val method_encodedOutLength = run {
-    val method = Base64::class.java.getDeclaredMethod("encodedOutLength", Int::class.java, Boolean::class.java)
-    method.isAccessible = true
-    return@run method
-}
 
 enum class PortalResult {
     NO_LINK,
@@ -169,10 +149,9 @@ class Portal(
 
         val outputBuffer = threadLocalOutputBuffer.get()
         outputBuffer.position = 0
-        val encoder = Base64.getEncoder().withoutPadding()
 
-        outputBuffer.ensureAtLeast(method_encodedOutLength.invoke(encoder, buffer.position, true) as Int)
-        val len = method_encode0.invoke(encoder, buffer.buffer.array(), 0, outputBuffer.buffer.array()) as Int
+        outputBuffer.ensureAtLeast(b64OutLen(buffer.position, true))
+        val len = b64Encode(buffer.buffer.array(), 0, buffer.position, outputBuffer.buffer.array())
 
 
         return buffer.position.toString(16).padStart(8, '0') + String(outputBuffer.buffer.array(), 0, len)
