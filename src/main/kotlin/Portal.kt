@@ -4,18 +4,10 @@ import org.bukkit.World
 import org.bukkit.entity.Player
 import java.nio.ByteBuffer
 import java.util.*
+import kotlin.Comparator
 import kotlin.experimental.and
 import kotlin.experimental.inv
 import kotlin.experimental.or
-
-private val PLAYER_COMPARATOR = Comparator<OfflinePlayer> { a, b -> a.uniqueId.compareTo(b.uniqueId) }
-val LOCATION_COMPARATOR = Comparator<Location> { a, b -> a.compareByOrder(b, { world!!.uid }, Location::getBlockX, Location::getBlockY, Location::getBlockZ) }
-
-// An owner cannot place two portals on the same block, implying that this comparator defines a partial order
-val PORTAL_LOCATION_COMPARATOR = Comparator<Portal> { a, b -> a.compareByOrder(b, { world.uid }, Portal::x, Portal::y, Portal::z, { owner.uniqueId }) }
-
-// IDs are unique, so this comparator inherently defines a partial order
-val PORTAL_UID_COMPARATOR = Comparator<Portal> { a, b -> a.id.compareTo(b.id) }
 
 
 private val threadLocalInputBuffer = ThreadLocal.withInitial { ReallocatingBuffer(ByteBuffer.allocate(96)) }
