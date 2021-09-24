@@ -44,6 +44,10 @@ class MultiSortedList<E> constructor(
         return true
     }
 
+    fun contains(element: E, comparator: Comparator<E>) =
+        if (comparator == this.comparator) contains(element)
+        else extraLists[comparator]!!.contains(element)
+
     override fun remove(element: E): Boolean {
         if (super.remove(element)) {
             extraLists.values.forEach {
@@ -89,6 +93,36 @@ class MultiSortedList<E> constructor(
     fun get(index: Int, comparator: Comparator<in E>) =
         if (comparator == this.comparator) this[index]
         else extraLists[comparator]!![index]
+
+    /**
+     * Get all contiguous elements that match a comparison
+     * @return Iterable object of all matching elements, or null if none exist
+     */
+    fun getAll(comparator: Comparator<in E>, comparison: (E) -> Int): Iterable<E>? {
+        var index = binSearch(comparator, comparison)
+        if (index < 0) return null
+
+        val result = LinkedList<E>()
+
+        var element: E
+        do {
+            element = get(index++, comparator)
+            if (comparison(element) != 0)
+                break
+
+            result += element
+        } while (index < size)
+
+        return result
+    }
+
+    fun findValueOrNull(comparator: Comparator<in E>, comparison: (E) -> Int): E? {
+        val index = binSearch(comparator, comparison)
+
+        if (index < 0) return null
+
+        return get(index, comparator)
+    }
 
     fun binSearch(element: E, comparator: Comparator<in E>) =
         if (comparator == this.comparator) binarySearch(element, comparator)
