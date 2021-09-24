@@ -1,22 +1,37 @@
 import org.bukkit.Location
+import org.bukkit.OfflinePlayer
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.event.EventHandler
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.plugin.Plugin
+import java.lang.Long.max
 import java.util.*
-import kotlin.collections.ArrayList
 
-private const val PATH_PLAYERS = "players"
-private const val PATH_WORLDS = "worlds"
-private const val PATH_PORTALS = "portals"
+private const val PATH_DATA_PLAYERS = "players"
+private const val PATH_DATA_WORLDS = "worlds"
+private const val PATH_DATA_PORTALS = "portals"
+private const val PATH_DATA_INVITES = "invites"
+
+private const val PATH_CONFIG_COOLDOWN = "playerTeleportCooldownTicks"
+
+private const val DEFAULT_COOLDOWN = 100L
+private const val DEFAULT_COOLDOWN_MIN = 5L
 
 
+// TODO: Adapt to proper DBMS because this is depressing garbage
 class PortalManager(private val data: ConfigurationSection, private val config: () -> ConfigurationSection): Listener {
-    private val players = PlayerMapper(data, PATH_PLAYERS)
-    private val worlds = WorldMapper(data, PATH_WORLDS)
-    private var portals = MultiSortedList(ArrayList(), PORTAL_LOCATION_COMPARATOR, PORTAL_UID_COMPARATOR)
+    private val players = PlayerMapper(data, PATH_DATA_PLAYERS)
+    private val worlds = WorldMapper(data, PATH_DATA_WORLDS)
+    private var portals = MultiSortedList(ArrayList(), COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID, COMPARATOR_PORTAL_OWNER_NAME, COMPARATOR_PORTAL_LINKS)
+    private var invitations = MultiSortedList(ArrayList(), COMPARATOR_INVITE_RECIPIENT, COMPARATOR_INVITE_PORTAL)
+
+    private val cooldowns = LinkedList<Pair<OfflinePlayer, Long>>()
+    private val cooldownsLookup = SortedList<OfflinePlayer>(ArrayList(), COMPARATOR_PLAYER)
+
+    private var cooldownTime = DEFAULT_COOLDOWN
+
 
     // Make UUIDs as "sequential" as possible
     private var nextUUIDUsed = false
@@ -33,7 +48,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             var msb = field.mostSignificantBits.toULong()
 
             // Start sequential search at the resulting index if it is populated
-            val index = portals.binSearch(PORTAL_UID_COMPARATOR) {
+            val index = portals.binSearch(COMPARATOR_PORTAL_UID) {
                 compareValues(
                     { msb } to { it.id.mostSignificantBits.toULong() },
                     { lsb } to { it.id.leastSignificantBits.toULong() }
@@ -46,7 +61,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
                     ++msb
 
                 for (i in index until portals.size) {
-                    val find = portals.get(index, PORTAL_UID_COMPARATOR).id
+                    val find = portals.get(index, COMPARATOR_PORTAL_UID).id
 
                     // Found a gap in the UUIDs
                     if (find.mostSignificantBits.toULong() != msb || find.leastSignificantBits.toULong() != lsb)
@@ -64,33 +79,41 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         }
 
     fun reload() {
+        cooldownTime = max(config().getLong(PATH_CONFIG_COOLDOWN), DEFAULT_COOLDOWN_MIN)
+
         players.reload()
         worlds.reload()
 
         val portalList = ArrayList<Portal>()
-        data.getStringList(PATH_PORTALS).forEach {
+        data.getStringList(PATH_DATA_PORTALS).forEach {
             val portal = readCompressedPortal(it, worlds::getValue, players::getValue) ?: return@forEach
             portalList += portal
 
             if (portal.id >= nextUUID)
                 nextUUID = portal.id + 1UL
         }
-        portals = MultiSortedList(portalList, PORTAL_LOCATION_COMPARATOR, PORTAL_UID_COMPARATOR)
+        portals = MultiSortedList(portalList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID)
 
         if(portals.isEmpty()) nextUUID = UUID(0, 0)
         else {
-            nextUUID = portals.get(0, PORTAL_UID_COMPARATOR).id + 1UL
+            nextUUID = portals.get(0, COMPARATOR_PORTAL_UID).id + 1UL
 
             // Compute next UUID
             nextUUID
             nextUUIDUsed = false
         }
+
+        invitations = MultiSortedList(
+            data.getStringList(PATH_DATA_INVITES).mapTo(ArrayList(), ::Invite),
+            COMPARATOR_INVITE_RECIPIENT,
+            COMPARATOR_INVITE_PORTAL
+        )
     }
 
     fun save() {
         players.save()
         worlds.save()
-        data.set(PATH_PORTALS, portals.map { it.toCompressedString(worlds::getIndex, players::getIndex) })
+        data.set(PATH_DATA_PORTALS, portals.map { it.toCompressedString(worlds::getIndex, players::getIndex) })
     }
 
     fun onEnable(plugin: Plugin) {
@@ -101,40 +124,144 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         HandlerList.unregisterAll(this)
     }
 
+    fun getInvitationsForPlayer(player: OfflinePlayer) =
+        invitations.getAll(COMPARATOR_INVITE_RECIPIENT) { player.uniqueId.compareTo(it.recipient.uniqueId) }
+
+    fun getInvitationsForPortal(portalID: UUID) =
+        invitations.getAll(COMPARATOR_INVITE_PORTAL) { portalID.compareTo(it.portalID) }
+
+    fun getInvitationsForPortal(portal: Portal) = getInvitationsForPortal(portal.id)
+
+    // This is a perfect example of why mysql is better
+    fun getInvitationsForPlayerFromPlayer(recipient: OfflinePlayer, sender: OfflinePlayer) =
+        invitations.getAll(COMPARATOR_INVITE_RECIPIENT) {
+            compareValues(
+                recipient::getUniqueId to it.recipient::getUniqueId,
+                portals.get(
+                    portals.binSearch(COMPARATOR_PORTAL_UID, it.portalID.COMPARISON_PORTAL_ID), COMPARATOR_PORTAL_UID
+                ).owner::getUniqueId to sender::getUniqueId
+            )
+        }
+
+    fun invitePlayer(player: OfflinePlayer, portal: Portal): Boolean {
+        // Player is already invited or already has a pending invitation
+        if (player in portal.accessExclusions || invitations.binSearch(COMPARATOR_INVITE_RECIPIENT) {
+                compareValues(player::getUniqueId to it.recipient::getUniqueId, portal::id to it::portalID)
+        } >= 0)
+            return false
+
+        invitations += Invite(player, portal)
+
+        return true
+    }
+
+    fun cancelInvite(player: OfflinePlayer, portal: Portal): Boolean {
+        val index = invitations.binSearch(COMPARATOR_INVITE_RECIPIENT) {
+            compareValues(
+                player::getUniqueId to it.recipient::getUniqueId,
+                portal::id to it::portalID
+            )
+        }
+
+        if (index < 0) return false
+        invitations.removeAt(index, COMPARATOR_INVITE_RECIPIENT)
+
+        return true
+    }
+
+    fun acceptInvite(player: OfflinePlayer, portal: Portal): Boolean {
+        if (!cancelInvite(player, portal)) return false
+
+        portal.accessExclusions += player
+
+        return true
+    }
+
+    fun declineInvite(player: OfflinePlayer, portal: Portal) = cancelInvite(player, portal)
+
+    // This makes me cry
+    fun makePortal(portal: Portal) =
+        !portals.contains(portal, COMPARATOR_PORTAL_OWNER_NAME) &&
+                !portals.contains(portal, COMPARATOR_PORTAL_LOCATION_OWNER) &&
+                portals.add(portal)
+
+    fun clearInvites(portal: Portal) = clearInvites(COMPARATOR_INVITE_PORTAL, portal.COMPARISON_INVITE)
+    fun clearInvites(recipient: OfflinePlayer) = clearInvites(COMPARATOR_INVITE_RECIPIENT, recipient.COMPARISON_INVITE)
+    private fun clearInvites(comparator: Comparator<Invite>, comparison: Comparison<Invite>) =
+        invitations.getAll(comparator, comparison)?.forEach(invitations::remove)
+
+    fun removePortal(owner: OfflinePlayer, name: String): Boolean {
+        val index = portals.binSearch(COMPARATOR_PORTAL_OWNER_NAME) {
+            compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
+        }
+
+        if (index < 0) return false
+
+        // Remove invites linked to this portal
+        clearInvites(portals.get(index, COMPARATOR_PORTAL_OWNER_NAME))
+        val removed = portals.removeAt(index, COMPARATOR_PORTAL_OWNER_NAME)
+
+        // Unlink portals
+        portals.getAll(COMPARATOR_PORTAL_LINKS, removed.COMPARISON_PORTAL_LINKEDTO)?.forEach(Portal::unlink)
+
+        return true
+    }
+
+    fun getPortal(owner: OfflinePlayer, name: String): Portal? {
+        val index = portals.binSearch(COMPARATOR_PORTAL_OWNER_NAME) {
+            compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
+        }
+
+        if (index < 0) return null
+
+        return portals.get(index, COMPARATOR_PORTAL_OWNER_NAME)
+    }
+
+    fun getPortalsAt(location: Location) =
+        portals.getAll(COMPARATOR_PORTAL_LOCATION_OWNER, location.COMPARISON_PORTAL)
+
+    private fun popCooldowns() {
+        val time = System.currentTimeMillis()
+        while (true) {
+            val front = cooldowns.first
+
+            if (front.second < time) {
+                cooldowns.removeFirst()
+                cooldownsLookup.remove(front.first)
+            }
+            else break
+        }
+    }
+
+    private fun isOnCooldown(player: OfflinePlayer): Boolean {
+        popCooldowns()
+        return cooldownsLookup.contains(player)
+    }
+
+    private fun triggerCooldown(player: OfflinePlayer) {
+        cooldowns.addLast(Pair(player, System.currentTimeMillis() + cooldownTime))
+    }
+
     @EventHandler
     fun onPlayerMove(moveEvent: PlayerMoveEvent) {
+        // If we're ignoring player movements for this player, just return immediately
+        if (isOnCooldown(moveEvent.player)) return
+
         fun UUID.portalMapper() = portals.firstOrNull { it.id == this }
         val to = moveEvent.to
 
         if (!moveEvent.isCancelled && to != null) {
             val found = getPortalsAt(to)
 
-            found?.firstOrNull { it.owner.uniqueId == moveEvent.player.uniqueId }
-                ?.enterPortal(moveEvent.player, UUID::portalMapper)
-                ?: found?.firstOrNull { it.enterPortal(moveEvent.player, UUID::portalMapper) == PortalResult.SUCCESS }
+            if ((found?.firstOrNull { it.owner.uniqueId == moveEvent.player.uniqueId }
+                    ?.enterPortal(moveEvent.player, UUID::portalMapper)
+                    ?: found?.firstOrNull {
+                        it.enterPortal(
+                            moveEvent.player,
+                            UUID::portalMapper
+                        ) == PortalResult.SUCCESS
+                    }) != null)
+                triggerCooldown(moveEvent.player)
         }
-    }
-
-    
-    // This is a very hot function: allocate with extreme care!
-    fun getPortalsAt(location: Location): LinkedList<Portal>? {
-        fun portalFinder(portal: Portal) =
-            compareValues(
-                location.world!!::getUID to portal.world::getUID,
-                location::getBlockX to portal::x,
-                location::getBlockY to portal::y,
-                location::getBlockZ to portal::z
-            )
-
-        // Don't allocate list unless there is data
-        var index = portals.binarySearch(comparison = ::portalFinder)
-        if (index < 0) return null
-
-        val result = LinkedList<Portal>()
-
-        do result += portals[index]
-        while (++index < portals.size && portalFinder(portals[index]) == 0)
-
-        return result
     }
 }
