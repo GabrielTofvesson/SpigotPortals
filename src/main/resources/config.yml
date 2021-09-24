@@ -1,1 +1,2 @@
 chunkLoadDestination: true
+playerTeleportCooldownTicks: 100
