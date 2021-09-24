@@ -72,6 +72,7 @@ class Portal(
     var pitch: Float,
     private var flags: Byte,
     link: UUID?,
+    var name: String,
     val accessExclusions: SortedList<OfflinePlayer>
 ) {
     init {
@@ -120,6 +121,16 @@ class Portal(
         }
     }
 
+    fun unlink() {
+        link = null
+    }
+
+    fun link(portal: Portal): Boolean {
+        if (this == portal) return false
+        link = portal.id
+        return true
+    }
+
     fun toCompressedString(worldMapper: MapFunction<World, UInt>, playerMapper: MapFunction<OfflinePlayer, UInt>): String {
         val buffer = threadLocalInputBuffer.get()
         buffer.position = 0
@@ -139,6 +150,9 @@ class Portal(
             buffer.long = link.mostSignificantBits
             buffer.long = link.leastSignificantBits
         }
+
+        buffer.putString(name)
+
         if (accessExclusions.size > 0) {
             for (player in accessExclusions)
                 buffer.packedUInt = playerMapper(player)
@@ -185,9 +199,10 @@ fun readCompressedPortal(
         },
         if (PortalFlag.LINKED.isFlagSet(flags)) UUID(inputBuffer.long, inputBuffer.long)
         else null,
-        if (PortalFlag.NO_EXCLUSIONS.isFlagSet(flags)) SortedList(comparator = PLAYER_COMPARATOR)
+        inputBuffer.getString(),
+        if (PortalFlag.NO_EXCLUSIONS.isFlagSet(flags)) SortedList(comparator = COMPARATOR_PLAYER)
         else run {
-            val collect = SortedList(comparator = PLAYER_COMPARATOR)
+            val collect = SortedList(comparator = COMPARATOR_PLAYER)
             while (inputBuffer.position < dataLen)
                 collect += playerMapper(inputBuffer.packedUInt) ?: continue
             return@run collect
