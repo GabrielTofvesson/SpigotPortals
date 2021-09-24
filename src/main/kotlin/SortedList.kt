@@ -1,9 +1,10 @@
 import java.util.*
 import kotlin.collections.ArrayList
+import kotlin.collections.RandomAccess
 
 open class SortedList<E> constructor(
     private val underlying: MutableList<E> = ArrayList(),
-    protected val comparator: Comparator<in E>
+    val comparator: Comparator<in E>
 ): MutableList<E> by underlying {
     companion object {
         fun <T: Comparable<T>> ofComparable(
@@ -17,38 +18,46 @@ open class SortedList<E> constructor(
             underlying.sortWith(comparator)
     }
 
-    override fun add(element: E): Boolean {
-        val index = underlying.binarySearch(element, comparator)
+    open fun add(element: E, searchForward: Boolean): Boolean {
+        val index = search(element, searchForward)
 
         underlying.add(if (index < 0) -(index + 1) else index, element)
 
         return true
     }
 
-    override fun add(index: Int, element: E) {
-        add(element)
-    }
+    override fun add(element: E) = add(element, true)
 
-    override fun addAll(elements: Collection<E>): Boolean {
+    open fun add(index: Int, element: E, searchForward: Boolean) {
+        add(element, searchForward)
+    }
+    override fun add(index: Int, element: E) = add(index, element, true)
+
+    override fun addAll(elements: Collection<E>): Boolean = addAll(elements, true)
+    open fun addAll(elements: Collection<E>, searchForward: Boolean): Boolean {
         for (element in elements)
-            add(element)
+            add(element, searchForward)
 
         return elements.isNotEmpty()
     }
 
-    override fun addAll(index: Int, elements: Collection<E>) = addAll(elements)
-    override fun contains(element: E) = underlying.binarySearch(element, comparator) >= 0
+    open fun addAll(index: Int, elements: Collection<E>, searchForward: Boolean) = addAll(elements, searchForward)
+    override fun addAll(index: Int, elements: Collection<E>) = addAll(index, elements, true)
+    open fun contains(element: E, searchForward: Boolean) = search(element, searchForward) >= 0
+    override fun contains(element: E) = contains(element, true)
 
-    override fun containsAll(elements: Collection<E>): Boolean {
+    override fun containsAll(elements: Collection<E>) = containsAll(elements, true)
+    open fun containsAll(elements: Collection<E>, searchForward: Boolean): Boolean {
         for (element in elements)
-            if (!contains(element))
+            if (!contains(element, searchForward))
                 return false
 
         return true
     }
 
-    override fun remove(element: E): Boolean {
-        val index = underlying.binarySearch(element, comparator)
+    override fun remove(element: E) = remove(element, true)
+    open fun remove(element: E, searchForward: Boolean): Boolean {
+        val index = search(element, searchForward)
 
         if (index >= 0) {
             underlying.removeAt(index)
@@ -59,12 +68,41 @@ open class SortedList<E> constructor(
     }
 
     override fun removeAt(index: Int) = underlying.removeAt(index)
-    override fun removeAll(elements: Collection<E>): Boolean {
+    override fun removeAll(elements: Collection<E>) = removeAll(elements, true)
+    open fun removeAll(elements: Collection<E>, searchForward: Boolean): Boolean {
         var result = false
 
         for (element in elements)
-            result = remove(element) || result
+            result = remove(element, searchForward) || result
 
         return result
     }
+
+    fun isRandomAccess() = underlying is RandomAccess
+
+    fun search(element: E, searchStartToEnd: Boolean = true) =
+        if (isRandomAccess()) binarySearch(element, comparator)
+        else {
+            // Sequential search, because it's probably faster than binary search
+            val index = if (searchStartToEnd) indexOfFirst { comparator.compare(element, it) >= 0 }
+            else indexOfLast { comparator.compare(element, it) <= 0 }
+
+            if (index < 0 && searchStartToEnd) -size
+            else if (index < 0) -1
+            else if (comparator.compare(element, this[index]) == 0) index
+            else -(index + 1)
+        }
+
+    fun search(comparison: Comparison<E>, searchStartToEnd: Boolean = true) =
+        if (isRandomAccess()) binarySearch(comparison = comparison)
+        else {
+            // Sequential search, because it's probably faster than binary search
+            val index = if (searchStartToEnd) indexOfFirst { comparison(it) >= 0 }
+            else indexOfLast { comparison(it) <= 0 }
+
+            if (index < 0 && searchStartToEnd) -size
+            else if (index < 0) -1
+            else if (comparison(this[index]) == 0) index
+            else -(index + 1)
+        }
 }

@@ -27,8 +27,8 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
     private var portals = MultiSortedList(::ArrayList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID, COMPARATOR_PORTAL_OWNER_NAME, COMPARATOR_PORTAL_LINKS)
     private var invitations = MultiSortedList(::ArrayList, COMPARATOR_INVITE_RECIPIENT, COMPARATOR_INVITE_PORTAL)
 
-    private val cooldowns = LinkedList<Pair<OfflinePlayer, Long>>()
-    private val cooldownsLookup = SortedList<OfflinePlayer>(ArrayList(), COMPARATOR_PLAYER)
+    // Player-based list needs to handle random access efficiently, whereas expiry list will always be accessed sequentially
+    private val cooldowns = MultiSortedList(ArrayList(), ::LinkedList, COMPARATOR_COOLDOWN_PLAYER, COMPARATOR_COOLDOWN_EXPIRY)
 
     private var cooldownTime = DEFAULT_COOLDOWN
 
@@ -48,7 +48,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             var msb = field.mostSignificantBits.toULong()
 
             // Start sequential search at the resulting index if it is populated
-            val index = portals.binSearch(COMPARATOR_PORTAL_UID) {
+            val index = portals.search(COMPARATOR_PORTAL_UID) {
                 compareValues(
                     { msb } to { it.id.mostSignificantBits.toULong() },
                     { lsb } to { it.id.leastSignificantBits.toULong() }
@@ -139,14 +139,14 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             compareValues(
                 recipient::getUniqueId to it.recipient::getUniqueId,
                 portals.get(
-                    portals.binSearch(COMPARATOR_PORTAL_UID, it.portalID.COMPARISON_PORTAL_ID), COMPARATOR_PORTAL_UID
+                    portals.search(COMPARATOR_PORTAL_UID, it.portalID.COMPARISON_PORTAL_ID), COMPARATOR_PORTAL_UID
                 ).owner::getUniqueId to sender::getUniqueId
             )
         }
 
     fun invitePlayer(player: OfflinePlayer, portal: Portal): Boolean {
         // Player is already invited or already has a pending invitation
-        if (player in portal.accessExclusions || invitations.binSearch(COMPARATOR_INVITE_RECIPIENT) {
+        if (player in portal.accessExclusions || invitations.search(COMPARATOR_INVITE_RECIPIENT) {
                 compareValues(player::getUniqueId to it.recipient::getUniqueId, portal::id to it::portalID)
         } >= 0)
             return false
@@ -157,7 +157,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
     }
 
     fun cancelInvite(player: OfflinePlayer, portal: Portal): Boolean {
-        val index = invitations.binSearch(COMPARATOR_INVITE_RECIPIENT) {
+        val index = invitations.search(COMPARATOR_INVITE_RECIPIENT) {
             compareValues(
                 player::getUniqueId to it.recipient::getUniqueId,
                 portal::id to it::portalID
@@ -192,7 +192,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         invitations.getAll(comparator, comparison)?.forEach(invitations::remove)
 
     fun removePortal(owner: OfflinePlayer, name: String): Boolean {
-        val index = portals.binSearch(COMPARATOR_PORTAL_OWNER_NAME) {
+        val index = portals.search(COMPARATOR_PORTAL_OWNER_NAME) {
             compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
         }
 
@@ -209,7 +209,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
     }
 
     fun getPortal(owner: OfflinePlayer, name: String): Portal? {
-        val index = portals.binSearch(COMPARATOR_PORTAL_OWNER_NAME) {
+        val index = portals.search(COMPARATOR_PORTAL_OWNER_NAME) {
             compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
         }
 
@@ -223,24 +223,20 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     private fun popCooldowns() {
         val time = System.currentTimeMillis()
-        while (true) {
-            val front = cooldowns.first
-
-            if (front.second < time) {
-                cooldowns.removeFirst()
-                cooldownsLookup.remove(front.first)
-            }
+        while (cooldowns.isNotEmpty()) {
+            val front = cooldowns.get(0, COMPARATOR_COOLDOWN_EXPIRY)
+            if (front.isExpired(time)) cooldowns.removeAt(0, COMPARATOR_COOLDOWN_EXPIRY)
             else break
         }
     }
 
     private fun isOnCooldown(player: OfflinePlayer): Boolean {
         popCooldowns()
-        return cooldownsLookup.contains(player)
+        return cooldowns.search(COMPARATOR_COOLDOWN_PLAYER, player.COMPARISON_COOLDOWN) >= 0
     }
 
     private fun triggerCooldown(player: OfflinePlayer) {
-        cooldowns.addLast(Pair(player, System.currentTimeMillis() + cooldownTime))
+        cooldowns.add(Pair(player, System.currentTimeMillis() + cooldownTime), false)
     }
 
     @EventHandler

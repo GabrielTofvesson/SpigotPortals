@@ -32,42 +32,41 @@ class MultiSortedList<E> constructor(
         SortedList(list, it)
     }
 
-    override fun add(element: E): Boolean {
+    override fun add(element: E) = add(element, true)
+    override fun add(element: E, searchForward: Boolean): Boolean {
         extraLists.values.forEach {
-            it.add(element)
+            it.add(element, searchForward)
         }
 
-        return super.add(element)
+        return super.add(element, searchForward)
     }
 
-    override fun add(index: Int, element: E) {
-        add(element)
+    override fun add(index: Int, element: E) = add(index, element, true)
+    override fun add(index: Int, element: E, searchForward: Boolean) {
+        add(element, searchForward)
     }
 
-    override fun addAll(elements: Collection<E>): Boolean {
+    override fun addAll(elements: Collection<E>) = addAll(elements, true)
+    override fun addAll(elements: Collection<E>, searchForward: Boolean): Boolean {
         for (element in elements)
-            add(element)
+            add(element, searchForward)
 
         return elements.isNotEmpty()
     }
 
-    override fun addAll(index: Int, elements: Collection<E>) = addAll(elements)
-    override fun containsAll(elements: Collection<E>): Boolean {
-        for (element in elements)
-            if (!contains(element))
-                return false
+    override fun addAll(index: Int, elements: Collection<E>) = addAll(index, elements, true)
+    override fun addAll(index: Int, elements: Collection<E>, searchForward: Boolean) = addAll(elements, searchForward)
 
-        return true
-    }
+    fun contains(element: E, comparator: Comparator<E>, searchForward: Boolean = true) =
+        if (comparator == this.comparator) super.contains(element, searchForward)
+        else extraLists[comparator]!!.contains(element, searchForward)
 
-    fun contains(element: E, comparator: Comparator<E>) =
-        if (comparator == this.comparator) contains(element)
-        else extraLists[comparator]!!.contains(element)
 
-    override fun remove(element: E): Boolean {
-        if (super.remove(element)) {
+    override fun remove(element: E) = remove(element, true)
+    override fun remove(element: E, searchForward: Boolean): Boolean {
+        if (super.remove(element, searchForward)) {
             extraLists.values.forEach {
-                it.remove(element)
+                it.remove(element, searchForward)
             }
 
             return true
@@ -76,31 +75,32 @@ class MultiSortedList<E> constructor(
         return false
     }
 
-    override fun removeAt(index: Int) = removeAt(index, comparator)
-
-    override fun removeAll(elements: Collection<E>): Boolean {
+    override fun removeAll(elements: Collection<E>) = removeAll(elements, true)
+    override fun removeAll(elements: Collection<E>, searchForward: Boolean): Boolean {
         var result = false
 
         for (element in elements)
-            result = remove(element) || result
+            result = remove(element, searchForward) || result
 
         return result
     }
 
-    fun removeAt(index: Int, comparator: Comparator<in E>): E {
+
+    override fun removeAt(index: Int) = removeAt(index, comparator)
+    fun removeAt(index: Int, comparator: Comparator<in E>, searchForward: Boolean = true): E {
         if (comparator == this.comparator) {
             val result = super.removeAt(index)
 
             extraLists.values.forEach {
-                it.remove(result)
+                it.remove(result, searchForward)
             }
 
             return result
         } else {
             val result = extraLists[comparator]!!.removeAt(index)
 
-            extraLists.forEach { (comp, list) -> if (comparator != comp) list.remove(result) }
-            super.remove(result)
+            extraLists.forEach { (comp, list) -> if (comparator != comp) list.remove(result, searchForward) }
+            super.remove(result, searchForward)
 
             return result
         }
@@ -115,7 +115,7 @@ class MultiSortedList<E> constructor(
      * @return Iterable object of all matching elements, or null if none exist
      */
     fun getAll(comparator: Comparator<in E>, comparison: (E) -> Int): Iterable<E>? {
-        var index = binSearch(comparator, comparison)
+        var index = search(comparator, comparison)
         if (index < 0) return null
 
         val result = LinkedList<E>()
@@ -133,18 +133,18 @@ class MultiSortedList<E> constructor(
     }
 
     fun findValueOrNull(comparator: Comparator<in E>, comparison: (E) -> Int): E? {
-        val index = binSearch(comparator, comparison)
+        val index = search(comparator, comparison)
 
         if (index < 0) return null
 
         return get(index, comparator)
     }
 
-    fun binSearch(element: E, comparator: Comparator<in E>) =
-        if (comparator == this.comparator) binarySearch(element, comparator)
-        else extraLists[comparator]!!.binarySearch(element, comparator)
+    fun search(element: E, comparator: Comparator<in E>, searchStartToEnd: Boolean = true) =
+        if (comparator == this.comparator) search(element, searchStartToEnd)
+        else extraLists[comparator]!!.search(element, searchStartToEnd)
 
-    fun binSearch(comparator: Comparator<in E>, comparison: (E) -> Int) =
-        if (comparator == this.comparator) binarySearch(comparison = comparison)
-        else extraLists[comparator]!!.binarySearch(comparison = comparison)
+    fun search(comparator: Comparator<in E>, comparison: (E) -> Int) =
+        if (comparator == this.comparator) search(comparison)
+        else extraLists[comparator]!!.search(comparison)
 }

@@ -4,6 +4,18 @@ import java.util.*
 import kotlin.Comparator
 
 typealias Comparison<V> = (V) -> Int
+typealias Cooldown = Pair<OfflinePlayer, Long>
+
+fun Cooldown.isExpired(currentTime: Long) = second < currentTime
+
+val COMPARATOR_COOLDOWN_PLAYER = Comparator<Cooldown> { a, b -> a.first.uniqueId.compareTo(b.first.uniqueId) }
+val COMPARATOR_COOLDOWN_EXPIRY = Comparator<Cooldown> { a, b -> a.second.compareTo(b.second) }
+
+val OfflinePlayer.COMPARISON_COOLDOWN: Comparison<Cooldown>
+    get() = { uniqueId.compareTo(it.first.uniqueId) }
+
+val Long.COMPARISON_COOLDOWN: Comparison<Cooldown>
+    get() = { compareTo(it.second) }
 
 val COMPARATOR_PLAYER = Comparator<OfflinePlayer> { a, b -> a.uniqueId.compareTo(b.uniqueId) }
 val COMPARATOR_LOCATION = Comparator<Location> { a, b -> a.compareByOrder(b, { world!!.uid }, Location::getBlockX, Location::getBlockY, Location::getBlockZ) }
