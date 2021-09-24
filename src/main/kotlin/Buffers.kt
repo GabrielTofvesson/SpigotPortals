@@ -1,4 +1,5 @@
 import java.nio.ByteBuffer
+import java.nio.charset.Charset
 import kotlin.math.min
 import kotlin.reflect.KMutableProperty0
 import kotlin.reflect.KProperty
@@ -143,6 +144,45 @@ class ReallocatingBuffer(buffer: ByteBuffer, val growthFactor: Float = 1.0f) {
 
     fun getPackedFloat(min: Float, max: Float) = buffer.readPackedRangeFloat(min, max)
     fun getPackedDouble(min: Double, max: Double) = buffer.readPackedRangeDouble(min, max)
+
+    fun putByteArrayDirect(array: ByteArray, off: Int = 0, len: Int = array.size) {
+        ensureSize(len)
+        buffer.put(array, off, len)
+    }
+
+    fun putByteArray(array: ByteArray, off: Int = 0, len: Int = array.size) {
+        ensureSize(len.toUInt().varIntSize)
+        packedUInt = len.toUInt()
+        putByteArrayDirect(array, off, len)
+    }
+    fun putString(string: String, charset: Charset = Charsets.UTF_8) = putByteArray(string.toByteArray(charset))
+
+    fun getByteArrayDirect(dst: ByteArray, off: Int = 0, len: Int = dst.size) {
+        buffer.get(dst, off, len)
+    }
+
+    fun getByteArrayDirect(len: Int): ByteArray {
+        val dst = ByteArray(len)
+        getByteArrayDirect(dst, 0, len)
+        return dst
+    }
+
+    fun getByteArray(dst: ByteArray) {
+        val len = packedUInt
+        if (len > dst.size.toUInt())
+            throw IndexOutOfBoundsException("Attempt to write past end of array")
+
+        getByteArrayDirect(dst, 0, len.toInt())
+    }
+
+    fun getByteArray(): ByteArray {
+        val dst = ByteArray(packedUInt.toInt())
+        getByteArrayDirect(dst, 0, dst.size)
+        return dst
+    }
+
+    // TODO: Optimize allocations
+    fun getString(charset: Charset = Charsets.UTF_8) = String(getByteArray(), charset)
 
     fun ensureAtLeast(minSize: Int) {
         if (minSize > size)
