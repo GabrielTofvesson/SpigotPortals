@@ -24,8 +24,8 @@ private const val DEFAULT_COOLDOWN_MIN = 5L
 class PortalManager(private val data: ConfigurationSection, private val config: () -> ConfigurationSection): Listener {
     private val players = PlayerMapper(data, PATH_DATA_PLAYERS)
     private val worlds = WorldMapper(data, PATH_DATA_WORLDS)
-    private var portals = MultiSortedList(ArrayList(), COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID, COMPARATOR_PORTAL_OWNER_NAME, COMPARATOR_PORTAL_LINKS)
-    private var invitations = MultiSortedList(ArrayList(), COMPARATOR_INVITE_RECIPIENT, COMPARATOR_INVITE_PORTAL)
+    private var portals = MultiSortedList(::ArrayList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID, COMPARATOR_PORTAL_OWNER_NAME, COMPARATOR_PORTAL_LINKS)
+    private var invitations = MultiSortedList(::ArrayList, COMPARATOR_INVITE_RECIPIENT, COMPARATOR_INVITE_PORTAL)
 
     private val cooldowns = LinkedList<Pair<OfflinePlayer, Long>>()
     private val cooldownsLookup = SortedList<OfflinePlayer>(ArrayList(), COMPARATOR_PLAYER)
@@ -92,7 +92,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             if (portal.id >= nextUUID)
                 nextUUID = portal.id + 1UL
         }
-        portals = MultiSortedList(portalList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID)
+        portals = MultiSortedList(portalList, ::ArrayList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID)
 
         if(portals.isEmpty()) nextUUID = UUID(0, 0)
         else {
@@ -105,6 +105,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
         invitations = MultiSortedList(
             data.getStringList(PATH_DATA_INVITES).mapTo(ArrayList(), ::Invite),
+            ::ArrayList,
             COMPARATOR_INVITE_RECIPIENT,
             COMPARATOR_INVITE_PORTAL
         )

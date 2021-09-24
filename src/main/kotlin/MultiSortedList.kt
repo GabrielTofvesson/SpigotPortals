@@ -1,20 +1,36 @@
 import java.util.*
 import kotlin.Comparator
+import kotlin.collections.ArrayList
 
 class MultiSortedList<E> constructor(
     underlying: MutableList<E>,
+    generator: () -> MutableList<E>,
     comparator: Comparator<in E>,
     vararg extraComparators: Comparator<in E>
 ): SortedList<E>(underlying, comparator) {
     companion object {
         fun <T: Comparable<T>> ofComparable(
-            underlying: MutableList<T> = ArrayList(),
+            underlying: MutableList<T>,
+            generator: () -> MutableList<T> = ::ArrayList,
             comparator: Comparator<in T> = Comparator { a, b -> a.compareTo(b) },
             vararg extraComparators: Comparator<in T>
-        ) = MultiSortedList(underlying, comparator, *extraComparators)
+        ) = MultiSortedList(underlying, generator, comparator, *extraComparators)
+
+        fun <T: Comparable<T>> ofComparable(
+            generator: () -> MutableList<T> = ::ArrayList,
+            comparator: Comparator<in T> = Comparator { a, b -> a.compareTo(b) },
+            vararg extraComparators: Comparator<in T>
+        ) = MultiSortedList(generator(), generator, comparator, *extraComparators)
     }
 
-    private var extraLists = extraComparators.associateWith { SortedList(underlying.subList(0, underlying.size), it) }
+    constructor(generator: () -> MutableList<E>, comparator: Comparator<in E>, vararg extraComparators: Comparator<in E>):
+            this(generator(), generator, comparator, *extraComparators)
+
+    private var extraLists = extraComparators.associateWith {
+        val list = generator()
+        Collections.copy(list, underlying)
+        SortedList(list, it)
+    }
 
     override fun add(element: E): Boolean {
         extraLists.values.forEach {
