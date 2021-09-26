@@ -13,6 +13,21 @@ class PortalsPlugin: JavaPlugin() {
         reloadConfig()
 
         portalManager.onEnable(this)
+
+
+        val command = PortalCommand(
+            portalManager,
+            description.permissions.first { it.name == "portals.create" },
+            description.permissions.first { it.name == "portals.modify.remove" },
+            description.permissions.first { it.name == "portals.modify.other" },
+            description.permissions.first { it.name == "portals.invite" },
+            description.permissions.first { it.name == "portals.invite.other" },
+            description.permissions.first { it.name == "portals.list.other" },
+        )
+
+        val pluginCommand = getCommand("portals")!!
+        pluginCommand.tabCompleter = command
+        pluginCommand.setExecutor(command)
     }
 
     override fun reloadConfig() {
