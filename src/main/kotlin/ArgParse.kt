@@ -4,48 +4,94 @@ import org.bukkit.command.CommandSender
 import org.bukkit.permissions.Permission
 import java.util.*
 
-typealias Suggestor = (args: List<Any?>, sender: CommandSender, current: String) -> Optional<List<String>>
-typealias ArgParser<T> = (String) -> Optional<T>
-typealias ArgNode<T> = Pair<ArgParser<T>, Suggestor>
+const val RESULT_ERROR_NOMATCH = "Unknown command"
+const val RESULT_ERROR_NOPERMS = "You don't have permission to use this command"
+const val RESULT_ERROR_PLAYER = "Player does not exist"
+const val RESULT_ERROR_NOTPLAYER = "Command can only be run by players"
+
+typealias Suggestor = (args: List<*>, sender: CommandSender, current: String) -> List<String>?
+typealias ArgParser<T> = (parsed: List<*>, current: String, sender: CommandSender) -> NodeParseResult<T>
+typealias ArgNode<T> = Pair<ArgParser<out T>, Suggestor>
 
 inline fun <reified T> constantParseNode(value: T, crossinline toStringFunc: T.() -> String = { this.toString() }): ArgNode<T> =
-    { it: String ->
-        if (it == value.toStringFunc()) Optional.of(value!!)
-        else Optional.empty()
+    { _: List<*>, current: String, _: CommandSender ->
+        if (current == value.toStringFunc()) NodeParseResult.SuccessResult(value)
+        else NodeParseResult.FailResult(RESULT_ERROR_NOMATCH)
     } to { _, _, current ->
-        if (current.startsWith(value.toStringFunc())) Optional.of(listOf(value.toStringFunc()))
-        else Optional.empty<List<String>>()
+        if (current.startsWith(value.toStringFunc())) listOf(value.toStringFunc())
+        else null
     }
 
-val PARSE_NODE_STRING: ArgNode<String> = { str: String -> Optional.of(str) } to { _, _, _ -> Optional.of(emptyList()) }
+val PARSE_NODE_STRING: ArgNode<String> = { _: List<*>, current: String, _: CommandSender -> NodeParseResult.SuccessResult(current) } to { _, _, _ -> emptyList() }
 val PARSE_NODE_PLAYER: ArgNode<OfflinePlayer> =
-    { str: String ->
-        val player = Bukkit.getOfflinePlayers().firstOrNull { it.name?.equals(str) == true }
-        if (player == null) Optional.empty<OfflinePlayer>()
-        else Optional.of(player)
+    { _: List<*>, current: String, _: CommandSender ->
+        val player = Bukkit.getOfflinePlayers().firstOrNull { it.name?.equals(current) == true }
+        if (player == null) NodeParseResult.FailResult(RESULT_ERROR_PLAYER)
+        else NodeParseResult.SuccessResult(player)
     } to { _, _, current ->
-        Optional.of(Bukkit.getOfflinePlayers().filter { it.name?.startsWith(current) == true }.map { it.name!! })
+        Bukkit.getOfflinePlayers()
+            .filter { it.name?.startsWith(current) == true }
+            .map { it.name!! }
+            .ifEmpty { null }
     }
 
 open class ParseBranch(private vararg val nodes: ArgNode<*>) {
-    open fun isEligible(sender: CommandSender): Boolean = true
-    fun getSuggestions(args: Array<String>, sender: CommandSender): Optional<List<String>> {
-        if (args.size > nodes.size) return Optional.empty()
+    open fun getFailReason(sender: CommandSender): String? = null
+    fun isEligible(sender: CommandSender) = getFailReason(sender) == null
 
-        return nodes[args.size - 1].second((0 until args.size - 1).map {
-            val parsed = nodes[it].first(args[it])
+    fun getSuggestions(args: Array<out String>, sender: CommandSender): List<String>? {
+        if (args.size > nodes.size) return null
 
-            if (parsed.isEmpty) return Optional.empty()
+        val parseList = ArrayList<Any?>(nodes.size - 1)
 
-            parsed.get()
-        }, sender, args[args.size - 1])
+        for (index in 0 until args.size - 1)
+            when (val parsed = nodes[index].first(parseList, args[index], sender)) {
+                is NodeParseResult.FailResult -> return null
+                is NodeParseResult.SuccessResult<*> -> parseList += parsed.match
+            }
+
+        return nodes[args.size - 1].second(parseList, sender, args[args.size - 1])
+    }
+
+    fun match(args: Array<out String>, sender: CommandSender): List<*>? {
+        if (args.size != nodes.size) return null
+
+        val parseList = ArrayList<Any?>(nodes.size)
+
+        for (index in args.indices)
+            when (val parsed = nodes[index].first(parseList, args[index], sender)) {
+                is NodeParseResult.FailResult -> return null
+                is NodeParseResult.SuccessResult<*> -> parseList += parsed.match
+            }
+
+        return parseList
     }
 }
 
-class PermissionParseBranch(private val permissionNode: Permission, private val allowConsole: Boolean, vararg nodes: ArgNode<*>): ParseBranch(*nodes) {
+open class PermissionParseBranch(private val permissionNode: Permission, private val allowConsole: Boolean, vararg nodes: ArgNode<*>): ParseBranch(*nodes) {
     constructor(permissionNode: Permission, vararg nodes: ArgNode<*>): this(permissionNode, true, *nodes)
-    override fun isEligible(sender: CommandSender) =
-        (sender is OfflinePlayer && sender.hasPermission(permissionNode)) || (sender !is OfflinePlayer && allowConsole)
+    override fun getFailReason(sender: CommandSender) =
+        when {
+            !allowConsole && sender !is OfflinePlayer -> RESULT_ERROR_NOTPLAYER
+            sender is OfflinePlayer && !sender.hasPermission(permissionNode) -> RESULT_ERROR_NOPERMS
+            else -> null
+        }
+}
+
+class PlayerParseBranch(vararg nodes: ArgNode<*>): ParseBranch(*nodes) {
+    override fun getFailReason(sender: CommandSender) =
+        if (sender is OfflinePlayer) null
+        else RESULT_ERROR_NOTPLAYER
+}
+
+sealed class ParseResult {
+    data class FailResult(val reason: String, val argIndex: Int, val relevant: Boolean): ParseResult()
+    data class SuccessResult(val match: List<*>, val parseBranch: ParseBranch): ParseResult()
+}
+
+sealed class NodeParseResult<T> {
+    data class FailResult<T>(val reason: String): NodeParseResult<T>()
+    data class SuccessResult<T>(val match: T): NodeParseResult<T>()
 }
 
 class ParseTree {
@@ -57,12 +103,20 @@ class ParseTree {
         return this
     }
 
-    fun getSuggestions(args: Array<String>, sender: CommandSender) =
+    fun getSuggestions(args: Array<out String>, sender: CommandSender) =
         branches.filter { it.isEligible(sender) }
-            .mapNotNull {
-                val suggestions = it.getSuggestions(args, sender)
-                return@mapNotNull if (suggestions.isEmpty) null else suggestions.get()
-            }
+            .mapNotNull { it.getSuggestions(args, sender) }
             .flatten()
             .toHashSet()
+
+    fun getMatch(args: Array<out String>, sender: CommandSender): ParseResult {
+        branches.forEach {
+            if (it.isEligible(sender)) {
+                val match = it.match(args, sender)
+                if (match != null) return ParseResult.SuccessResult(match, it)
+            }
+        }
+
+        return ParseResult.FailResult(RESULT_ERROR_NOMATCH, 0, true)
+    }
 }
