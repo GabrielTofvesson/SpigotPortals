@@ -46,6 +46,9 @@ open class SortedList<E> constructor(
     open fun contains(element: E, searchForward: Boolean) = search(element, searchForward) >= 0
     override fun contains(element: E) = contains(element, true)
 
+    override fun indexOf(element: E) = search(element, true)
+    override fun lastIndexOf(element: E) = search(element, false)
+
     override fun containsAll(elements: Collection<E>) = containsAll(elements, true)
     open fun containsAll(elements: Collection<E>, searchForward: Boolean): Boolean {
         for (element in elements)
