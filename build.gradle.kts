@@ -60,6 +60,11 @@ spigot {
             defaults = "true"
         }
 
+        create("portals.list.other") {
+            description = "Allows listing other players' portals"
+            defaults = "op"
+        }
+
         create("portals.invite") {
             description = "Allows inviting players to portals"
             defaults = "true"
@@ -68,11 +73,6 @@ spigot {
         create("portals.invite.other") {
             description = "Allows inviting players to another players portal"
             defaults = "true"
-        }
-
-        create("portals.list.other") {
-            description = "Allows listing other players' portals"
-            defaults = "op"
         }
 
         create("portals.tp") {
