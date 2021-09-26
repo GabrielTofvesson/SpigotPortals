@@ -170,15 +170,53 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         return true
     }
 
-    fun acceptInvite(player: OfflinePlayer, portal: Portal): Boolean {
-        if (!cancelInvite(player, portal)) return false
+    fun cancelInvite(invite: Invite) =
+        invitations.remove(invite)
 
-        portal.accessExclusions += player
+    private fun acceptInvite0(player: OfflinePlayer, portal: Portal) {
+        if (portal.public) portal.accessExclusions -= player
+        else portal.accessExclusions += player
+    }
+
+    fun acceptInvite(player: OfflinePlayer, portal: Portal): Boolean {
+        if (!cancelInvite(player, portal) || (player in portal.accessExclusions != portal.public)) return false
+
+        acceptInvite0(player, portal)
+
+        return true
+    }
+
+    fun acceptInvite(invite: Invite): Boolean {
+        val portal = getPortal(invite.portalID) ?: return false
+        if (!cancelInvite(invite) || (invite.recipient in portal.accessExclusions != portal.public)) return false
+
+        acceptInvite0(invite.recipient, portal)
 
         return true
     }
 
     fun declineInvite(player: OfflinePlayer, portal: Portal) = cancelInvite(player, portal)
+    fun declineInvite(invite: Invite) = cancelInvite(invite)
+
+
+    fun makePortal(owner: OfflinePlayer, name: String, location: Location, link: Portal? = null): Portal? {
+        val portal = Portal(
+            nextUUID,
+            owner,
+            location.world!!,
+            location.blockX,
+            location.blockY,
+            location.blockZ,
+            location.yaw,
+            location.pitch,
+            0,
+            link?.id,
+            name,
+            SortedList(comparator = COMPARATOR_PLAYER)
+        )
+
+        return if (makePortal(portal)) portal else null
+    }
 
     // This makes me cry
     fun makePortal(portal: Portal) =
@@ -208,6 +246,14 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         return true
     }
 
+    fun removePortal(portal: Portal) = portals.remove(portal)
+
+    fun getPortal(uuid: UUID): Portal? {
+        val index = portals.search(COMPARATOR_PORTAL_UID, uuid.COMPARISON_PORTAL_ID)
+        if (index < 0) return null
+        return portals.get(index, COMPARATOR_PORTAL_UID)
+    }
+
     fun getPortal(owner: OfflinePlayer, name: String): Portal? {
         val index = portals.search(COMPARATOR_PORTAL_OWNER_NAME) {
             compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
@@ -217,6 +263,17 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
         return portals.get(index, COMPARATOR_PORTAL_OWNER_NAME)
     }
+
+    fun getPortals(owner: OfflinePlayer) =
+        portals.getAll(COMPARATOR_PORTAL_OWNER_NAME) { owner.uniqueId.compareTo(it.owner.uniqueId) }
+
+    fun getPortalsByPartialName(owner: OfflinePlayer, namePart: String) =
+        portals.getAll(COMPARATOR_PORTAL_OWNER_NAME) {
+            compareValues(
+                owner::getUniqueId to it.owner::getUniqueId,
+                { namePart } to { it.name.substring(0, namePart.length.coerceAtMost(it.name.length)) }
+            )
+        }
 
     fun getPortalsAt(location: Location) =
         portals.getAll(COMPARATOR_PORTAL_LOCATION_OWNER, location.COMPARISON_PORTAL)
