@@ -8,19 +8,23 @@ const val RESULT_ERROR_NOMATCH = "Unknown command"
 const val RESULT_ERROR_NOPERMS = "You don't have permission to use this command"
 const val RESULT_ERROR_PLAYER = "Player does not exist"
 const val RESULT_ERROR_NOTPLAYER = "Command can only be run by players"
+const val RESULT_ERROR_NOTDECIMAL = "\"%s\" is not a number"
+const val RESULT_ERROR_NOTINT = "\"%s\" is not an integer"
+const val RESULT_ERROR_NOTENUM = "Value is not one of following: %s"
 
 typealias Suggestor = (args: List<*>, sender: CommandSender, current: String) -> List<String>?
 typealias ArgParser<T> = (parsed: List<*>, current: String, sender: CommandSender) -> NodeParseResult<T>
 typealias ArgNode<T> = Pair<ArgParser<out T>, Suggestor>
 
-inline fun <reified T> constantParseNode(value: T, crossinline toStringFunc: T.() -> String = { this.toString() }): ArgNode<T> =
+inline fun <reified T> constantParseNode(value: T, crossinline toStringFunc: T.() -> String = { this.toString() }): ArgNode<T> = value.toStringFunc().let {
     { _: List<*>, current: String, _: CommandSender ->
-        if (current == value.toStringFunc()) NodeParseResult.SuccessResult(value)
+        if (current == it) NodeParseResult.SuccessResult(value)
         else NodeParseResult.FailResult(RESULT_ERROR_NOMATCH)
     } to { _, _, current ->
-        if (current.startsWith(value.toStringFunc())) listOf(value.toStringFunc())
+        if (it.startsWith(current)) listOf(it)
         else null
     }
+}
 
 val PARSE_NODE_STRING: ArgNode<String> = { _: List<*>, current: String, _: CommandSender -> NodeParseResult.SuccessResult(current) } to { _, _, _ -> emptyList() }
 val PARSE_NODE_PLAYER: ArgNode<OfflinePlayer> =
@@ -32,6 +36,38 @@ val PARSE_NODE_PLAYER: ArgNode<OfflinePlayer> =
         Bukkit.getOfflinePlayers()
             .filter { it.name?.startsWith(current) == true }
             .map { it.name!! }
+            .ifEmpty { null }
+    }
+
+val PARSE_NODE_DECIMAL: ArgNode<Double> =
+    { _: List<*>, current: String, _: CommandSender ->
+        val result = current.toDoubleOrNull()
+        if (result == null) NodeParseResult.FailResult(RESULT_ERROR_NOTDECIMAL.format(current))
+        else NodeParseResult.SuccessResult(result)
+    } to { _, _, current ->
+        if (current.toDoubleOrNull() == null) null
+        else listOf("0.0", "90.0", "180.0", "270.0", "360.0")
+    }
+
+val PARSE_NODE_INTEGER: ArgNode<Int> =
+    { _: List<*>, current: String, _: CommandSender ->
+        val result = current.toIntOrNull()
+        if (result == null) NodeParseResult.FailResult(RESULT_ERROR_NOTINT.format(current))
+        else NodeParseResult.SuccessResult(result)
+    } to { _, _, current ->
+        if (current.toIntOrNull() == null) null
+        else emptyList()
+    }
+
+inline fun <reified T: Enum<T>> enumParseNode(): ArgNode<T> =
+    { _: List<*>, current: String, _: CommandSender ->
+        val parsed = T::class.java.enumConstants.firstOrNull { it.name.equals(current, ignoreCase = true) }
+        if (parsed == null) NodeParseResult.FailResult(RESULT_ERROR_NOTENUM.format(T::class.java.enumConstants.joinToString { it.name }))
+        else NodeParseResult.SuccessResult(parsed)
+    } to { _, _, current: String ->
+        T::class.java.enumConstants
+            .filter { it.name.startsWith(current, ignoreCase = true) }
+            .map { it.name }
             .ifEmpty { null }
     }
 

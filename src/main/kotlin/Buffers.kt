@@ -1,18 +1,28 @@
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.math.MathContext
 import java.nio.ByteBuffer
 import java.nio.charset.Charset
 import kotlin.math.min
 import kotlin.reflect.KMutableProperty0
 import kotlin.reflect.KProperty
-import kotlin.reflect.KProperty0
-import kotlin.reflect.KProperty1
 
-fun ByteBuffer.writePackedRange(value: Double, min: Double, max: Double) {
-    packedULong = ((value - min)/max).toULong()
+private val threadLocalBuffer = ThreadLocal.withInitial { ByteBuffer.allocate(9) }
+
+internal val PRECISION_1024 = MathContext(1024)
+
+fun ByteBuffer.writePackedRange(_value: BigDecimal, min: BigDecimal, max: BigDecimal) {
+    val actualMax = max - min
+    packedULong = _value
+        .subtract(min)
+        .coerceIn(min .. actualMax)
+        .multiply(ULONG_MAX_FLOAT.divide(actualMax, PRECISION_1024))
+        .toBigInteger()
+        .toULong()
 }
 
-fun ByteBuffer.writePackedRange(value: Float, min: Float, max: Float) {
-    packedULong = ((value - min)/max).toULong()
-}
+fun ByteBuffer.writePackedRange(_value: Double, min: Double, max: Double) = writePackedRange(BigDecimal(_value), BigDecimal(min), BigDecimal(max))
+fun ByteBuffer.writePackedRange(value: Float, min: Float, max: Float) = writePackedRange(value.toDouble(), min.toDouble(), max.toDouble())
 
 var ByteBuffer.packedULong: ULong
     get() = readPacked().first
@@ -42,24 +52,29 @@ var ByteBuffer.packedChar: Char
     get() = packedInt.toChar()
     set(value) { packedInt = value.code }
 
-fun ByteBuffer.readPackedRangeDouble(min: Double, max: Double) = (packedLong * max) + min
-fun ByteBuffer.readPackedRangeFloat(min: Float, max: Float) = (packedLong * max) + min
+fun ByteBuffer.readPackedRangeDouble(min: Double, max: Double): Double {
+    val buffer = threadLocalBuffer.get()
+    return ((BigInteger(buffer.position(0).put(0).putLong(packedULong.toLong()).array(), 0, 9).toBigDecimal(mathContext = MathContext.UNLIMITED) *
+            (BigDecimal(max).divide(BigInteger(buffer.position(1).putLong(-1L).array(), 0, 9).toBigDecimal(mathContext = MathContext.UNLIMITED), PRECISION_1024))) + BigDecimal(min)).toDouble()
+}
+
+fun ByteBuffer.readPackedRangeFloat(min: Float, max: Float) = readPackedRangeDouble(min.toDouble(), max.toDouble())
 
 
 class ReallocatingBuffer(buffer: ByteBuffer, val growthFactor: Float = 1.0f) {
     // Handles reads/writes
     private abstract inner class ReallocatingAccessor<T>(
-        private val getter: () -> T,
-        private val setter: (T) -> Unit
+        private val getter: () -> () -> T,
+        private val setter: () -> (T) -> Unit
     ) {
         protected abstract fun sizeOf(value: T): Int
 
-        constructor(property: KMutableProperty0<T>): this(property::get, property::set)
+        constructor(property: () -> KMutableProperty0<T>): this({ property()::get }, { property()::set })
 
-        operator fun getValue(thisRef: Any?, property: KProperty<*>) = getter()
+        operator fun getValue(thisRef: Any?, property: KProperty<*>) = getter()()
         operator fun setValue(thisRef: Any?, property: KProperty<*>, value: T) {
-            ensureSize(size)
-            setter(value)
+            ensureSize(sizeOf(value))
+            setter()(value)
         }
     }
 
@@ -67,20 +82,16 @@ class ReallocatingBuffer(buffer: ByteBuffer, val growthFactor: Float = 1.0f) {
         getter: () -> T,
         setter: (T) -> Unit,
         private val size: Int
-    ): ReallocatingAccessor<T>(getter, setter) {
-        constructor(property: KMutableProperty0<T>, size: Int): this(property::get, property::set, size)
-
+    ): ReallocatingAccessor<T>({ getter }, { setter }) {
         override fun sizeOf(value: T) = size
     }
 
     private inner class VarIntReallocatingAccessor<T>(
-        getter: () -> T,
-        setter: (T) -> Unit,
+        getter: () -> () -> T,
+        setter: () -> (T) -> Unit,
         private val sizeGetter: T.() -> Int
     ): ReallocatingAccessor<T>(getter, setter) {
-        constructor(getter: () -> T, setter: (T) -> Unit, sizeGetter: KProperty1<T, Int>): this(getter, setter, sizeGetter::get)
-        constructor(property: KMutableProperty0<T>, sizeGetter: T.() -> Int): this(property::get, property::set, sizeGetter)
-        constructor(property: KMutableProperty0<T>, sizeGetter: KProperty1<T, Int>): this(property::get, property::set, sizeGetter::get)
+        constructor(property: () -> KMutableProperty0<T>, sizeGetter: T.() -> Int): this({ property()::get }, { property()::set }, sizeGetter)
 
         override fun sizeOf(value: T) = sizeGetter(value)
     }
@@ -88,24 +99,24 @@ class ReallocatingBuffer(buffer: ByteBuffer, val growthFactor: Float = 1.0f) {
     var buffer = buffer
         private set
 
-    var byte: Byte by StaticReallocatingAccessor(buffer::get, buffer::put, 1)
-    var char: Char by StaticReallocatingAccessor(buffer::getChar, buffer::putChar, 2)
-    var short: Short by StaticReallocatingAccessor(buffer::getShort, buffer::putShort, 2)
-    var int: Int by StaticReallocatingAccessor(buffer::getInt, buffer::putInt, 4)
-    var long: Long by StaticReallocatingAccessor(buffer::getLong, buffer::putLong, 8)
-    var uShort: UShort by StaticReallocatingAccessor({ buffer.short.toUShort() }, { buffer.putShort(it.toShort()) }, 2)
-    var uInt: UInt by StaticReallocatingAccessor({ buffer.int.toUInt() }, { buffer.putInt(it.toInt()) }, 4)
-    var uLong: ULong by StaticReallocatingAccessor({ buffer.long.toULong() }, { buffer.putLong(it.toLong()) }, 8)
-    var float: Float by StaticReallocatingAccessor(buffer::getFloat, buffer::putFloat, 4)
-    var double: Double by StaticReallocatingAccessor(buffer::getDouble, buffer::putDouble, 4)
+    var byte: Byte by StaticReallocatingAccessor({ this.buffer.get() }, { this.buffer.put(it) }, 1)
+    var char: Char by StaticReallocatingAccessor({ this.buffer.char }, { this.buffer.putChar(it) }, 2)
+    var short: Short by StaticReallocatingAccessor({ this.buffer.short }, { this.buffer.putShort(it) }, 2)
+    var int: Int by StaticReallocatingAccessor({ this.buffer.int }, { this.buffer.putInt(it) }, 4)
+    var long: Long by StaticReallocatingAccessor({ this.buffer.long }, { this.buffer.putLong(it) }, 8)
+    var uShort: UShort by StaticReallocatingAccessor({ this.buffer.short.toUShort() }, { this.buffer.putShort(it.toShort()) }, 2)
+    var uInt: UInt by StaticReallocatingAccessor({ this.buffer.int.toUInt() }, { this.buffer.putInt(it.toInt()) }, 4)
+    var uLong: ULong by StaticReallocatingAccessor({ this.buffer.long.toULong() }, { this.buffer.putLong(it.toLong()) }, 8)
+    var float: Float by StaticReallocatingAccessor({ this.buffer.float }, { this.buffer.putFloat(it) }, 4)
+    var double: Double by StaticReallocatingAccessor({ this.buffer.double }, { this.buffer.putDouble(it) }, 8)
 
-    var packedChar: Char by VarIntReallocatingAccessor(buffer::packedChar, Char::varIntSize)
-    var packedShort: Short by VarIntReallocatingAccessor(buffer::packedShort, Short::varIntSize)
-    var packedInt: Int by VarIntReallocatingAccessor(buffer::packedInt, Int::varIntSize)
-    var packedLong: Long by VarIntReallocatingAccessor(buffer::packedLong, Long::varIntSize)
-    var packedUShort: UShort by VarIntReallocatingAccessor(buffer::packedUShort, UShort::varIntSize)
-    var packedUInt: UInt by VarIntReallocatingAccessor(buffer::packedUInt, UInt::varIntSize)
-    var packedULong: ULong by VarIntReallocatingAccessor(buffer::packedULong, ULong::varIntSize)
+    var packedChar: Char by VarIntReallocatingAccessor({ this.buffer::packedChar }, Char::varIntSize)
+    var packedShort: Short by VarIntReallocatingAccessor({ this.buffer::packedShort }, Short::varIntSize)
+    var packedInt: Int by VarIntReallocatingAccessor({ this.buffer::packedInt }, Int::varIntSize)
+    var packedLong: Long by VarIntReallocatingAccessor({ this.buffer::packedLong }, Long::varIntSize)
+    var packedUShort: UShort by VarIntReallocatingAccessor({ this.buffer::packedUShort }, UShort::varIntSize)
+    var packedUInt: UInt by VarIntReallocatingAccessor({ this.buffer::packedUInt }, UInt::varIntSize)
+    var packedULong: ULong by VarIntReallocatingAccessor({ this.buffer::packedULong }, ULong::varIntSize)
 
     var position: Int
         get() = buffer.position()
@@ -119,7 +130,7 @@ class ReallocatingBuffer(buffer: ByteBuffer, val growthFactor: Float = 1.0f) {
                 val newBuffer = if(buffer.isDirect) ByteBuffer.allocateDirect(value) else ByteBuffer.allocate(value)
 
                 position = 0
-                newBuffer.put(buffer)
+                newBuffer.put(0, buffer, 0, min(oldPosition, value))
                 position = min(oldPosition, value)
 
                 buffer = newBuffer
@@ -142,7 +153,7 @@ class ReallocatingBuffer(buffer: ByteBuffer, val growthFactor: Float = 1.0f) {
         buffer.writePackedRange(value, min, max)
     }
 
-    fun getPackedFloat(min: Float, max: Float) = buffer.readPackedRangeFloat(min, max)
+    fun getPackedFloat(min: Float, max: Float) = buffer.readPackedRangeFloat(min, max).toFloat()
     fun getPackedDouble(min: Double, max: Double) = buffer.readPackedRangeDouble(min, max)
 
     fun putByteArrayDirect(array: ByteArray, off: Int = 0, len: Int = array.size) {

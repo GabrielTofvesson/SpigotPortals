@@ -15,8 +15,8 @@ repositories {
 dependencies {
     compileOnly(spigot("1.17.1"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.5.30")
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.8.0")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.8.0")
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.8.1")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.8.1")
 }
 
 tasks.getByName<Test>("test") {
@@ -77,11 +77,21 @@ spigot {
 
         create("portals.tp") {
             description = "Allows teleporting to a portal"
-            defaults = "op"
+            defaults = "true"
         }
 
         create("portals.tp.other") {
             description = "Allows teleporting to other players' portals"
+            defaults = "op"
+        }
+
+        create("portals.info") {
+            description = "Get info about a portal"
+            defaults = "true"
+        }
+
+        create("portals.info.other") {
+            description = "Get info about another player's portal"
             defaults = "op"
         }
 
@@ -101,7 +111,7 @@ spigot {
         }
 
         create("portals.modify.allow") {
-            description = "Allows another player to use a portal"
+            description = "Allows another player to edit a portal"
             defaults = "true"
         }
 
@@ -131,6 +141,8 @@ spigot {
                 "portals.list.other" to true,
                 "portals.tp" to true,
                 "portals.tp.other" to true,
+                "portals.info" to true,
+                "portals.info.other" to true,
                 "portals.modify.*" to true,
                 "portals.invite" to true,
                 "portals.invite.other" to true

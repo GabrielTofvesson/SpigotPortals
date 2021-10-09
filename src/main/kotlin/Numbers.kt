@@ -1,5 +1,11 @@
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.math.MathContext
 import java.nio.ByteBuffer
 import java.util.*
+
+internal val ULONG_MAX_INTEGER = BigInteger(byteArrayOf(0, 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()))
+internal val ULONG_MAX_FLOAT = ULONG_MAX_INTEGER.toBigDecimal(mathContext = MathContext.UNLIMITED)
 
 private val threadLocalBuffer = ThreadLocal.withInitial { ByteBuffer.allocateDirect(9) }
 
@@ -87,12 +93,12 @@ val ULong.varIntSize
     get() =
         if (this <= 240UL) 1
         else if(this <= 2287UL) 2
-        else if(this <= 67823UL) 2
-        else if(this <= 16777215UL) 2
-        else if(this <= 4294967295UL) 2
-        else if(this <= 1099511627775UL) 2
-        else if(this <= 281474976710655UL) 2
-        else if(this <= 72057594037927935UL) 2
+        else if(this <= 67823UL) 3
+        else if(this <= 16777215UL) 4
+        else if(this <= 4294967295UL) 5
+        else if(this <= 1099511627775UL) 6
+        else if(this <= 281474976710655UL) 7
+        else if(this <= 72057594037927935UL) 8
         else 9
 
 val UInt.varIntSize get() = toULong().varIntSize
@@ -103,9 +109,26 @@ val Int.varIntSize get() = toLong().interlace().varIntSize
 val Short.varIntSize get() = toLong().interlace().varIntSize
 val Char.varIntSize get() = code.varIntSize
 
-fun Float.varIntSize(min: Float, max: Float) = ((this - min)/max).toULong().varIntSize
-fun Double.varIntSize(min: Double, max: Double) = ((this - min)/max).toULong().varIntSize
+fun Float.varIntSize(min: Float, max: Float) = toDouble().varIntSize(min.toDouble(), max.toDouble())
+fun Double.varIntSize(min: Double, max: Double) = BigDecimal(this).varIntSize(BigDecimal(min), BigDecimal(max))
+fun BigDecimal.varIntSize(min: BigDecimal, max: BigDecimal) =
+    this.subtract(min)
+        .coerceIn(min .. (max - min))
+        .multiply(ULONG_MAX_FLOAT.divide((max - min), PRECISION_1024))
+        .toBigInteger()
+        .toULong()
+        .varIntSize
 
+fun BigInteger.toULong(): ULong {
+    val array = toByteArray()
+    return threadLocalBuffer
+        .get()
+        .put(0, 0)
+        .putLong(1, 0)
+        .put(0, array, 0, array.size.coerceAtMost(9))
+        .getLong(kotlin.math.max(array.size - 8, 0))
+        .toULong()
+}
 
 operator fun UUID.plus(value: ULong): UUID {
     val lsb = leastSignificantBits.toULong() + value

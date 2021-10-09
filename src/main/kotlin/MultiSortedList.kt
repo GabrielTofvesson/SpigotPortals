@@ -28,7 +28,7 @@ class MultiSortedList<E> constructor(
 
     private var extraLists = extraComparators.associateWith {
         val list = generator()
-        Collections.copy(list, underlying)
+        list.addAll(underlying)
         SortedList(list, it)
     }
 

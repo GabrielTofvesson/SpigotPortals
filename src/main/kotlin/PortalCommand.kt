@@ -30,11 +30,18 @@ private const val RESULT_SUCCESS_INVITEOTHER = "Invited %s to portal \"%s\", own
 private const val RESULT_SUCCESS_CANCEL = "Cancelled invitation of %s to portal \"%s\""
 private const val RESULT_SUCCESS_ACCEPT = "Accepted invite from %s to portal \"%s\""
 private const val RESULT_SUCCESS_DECLINE = "Declined invite from %s to portal \"%s\""
+private const val RESULT_SUCCESS_TP = "Teleported to portal \"%s\""
+private const val RESULT_SUCCESS_TPO = "Teleported to portal \"%s\", owned by %s"
+private const val RESULT_SUCCESS_EDIT_YAW = "Set yaw to %f degrees"
+private const val RESULT_SUCCESS_EDIT_PITCH = "Set pitch to %f degrees"
 
 private const val RESULT_INFO_LIST = "List of portals owned by %s:"
+private const val RESULT_INFO_PORTAL = "Portal \"%s\" (%s; %d, %d, %d; %f, %f) (%s)"
+private const val RESULT_INFO_PORTAL_LINKED = "Linked to \"%s\""
+private const val RESULT_INFO_PORTAL_UNLINKED = "Un-linked"
 
 
-private val OfflinePlayer.playerName: String
+val OfflinePlayer.playerName: String
     get() = name ?: "<Name Missing>"
 
 
@@ -45,15 +52,20 @@ class PortalCommand(
     permissionRemoveOther: Permission,
     permissionInvite: Permission,
     permissionInviteOther: Permission,
-    permissionListOther: Permission
+    permissionListOther: Permission,
+    permissionTp: Permission,
+    permissionTpOther: Permission,
+    permissionInfo: Permission,
+    permissionInfoOther: Permission,
+    permissionEdit: Permission
 ): CommandExecutor, TabCompleter {
     // Arg parse node for targeting a portal owned by the sender
     private val senderPortalParseNode: ArgNode<Portal> =
-        { parsed: List<*>, current: String, sender: CommandSender ->
+        { _: List<*>, current: String, sender: CommandSender ->
             val portal = portalManager.getPortal(sender as OfflinePlayer, current)
             if (portal == null) NodeParseResult.FailResult(RESULT_ERROR_NOPORTAL)
             else NodeParseResult.SuccessResult(portal)
-        } to { parsed: List<*>, sender: CommandSender, current: String ->
+        } to { _: List<*>, sender: CommandSender, current: String ->
             portalManager.getPortalsByPartialName(sender as OfflinePlayer, current)?.mapTo(ArrayList(), Portal::name)
         }
 
@@ -105,35 +117,53 @@ class PortalCommand(
     private val portalParse = ParseTree()
         .branch(PermissionParseBranch(permissionCreate, false, constantParseNode("create"), PARSE_NODE_STRING, senderPortalParseNode))                          //  portals create [name] [linkName]
         .branch(PermissionParseBranch(permissionCreate, false, constantParseNode("create"), PARSE_NODE_STRING))                                                 //  portals create [name]
-        .branch(PermissionParseBranch(permissionRemove, false, constantParseNode("remove"), PARSE_NODE_STRING))                                                 //  portals remove [name]
+        .branch(PermissionParseBranch(permissionRemove, false, constantParseNode("remove"), senderPortalParseNode))                                             //  portals remove [name]
         .branch(PermissionParseBranch(permissionRemoveOther, constantParseNode("remove"), PARSE_NODE_PLAYER, otherPortalParseNode))                             //  portals remove [player] [name]
         .branch(PlayerParseBranch(constantParseNode("uninvite"), senderPortalParseNode, PARSE_NODE_PLAYER))                                                     //  portals uninvite [name] [player]
         .branch(PermissionParseBranch(permissionInviteOther, false, constantParseNode("uninvite"), PARSE_NODE_PLAYER, otherPortalParseNode, PARSE_NODE_PLAYER)) //  portals uninvite [owner] [name] [player]
-        .branch(constantParseNode("link"), senderPortalParseNode, senderPortalParseNode)                                                                        //  portals link [name] [linkName]
-        .branch(constantParseNode("unlink"), senderPortalParseNode)                                                                                             //  portals unlink [name]
-        .branch(constantParseNode("list"))                                                                                                                      //  portals list
+        .branch(PlayerParseBranch(constantParseNode("link"), senderPortalParseNode, senderPortalParseNode))                                                     //  portals link [name] [linkName]
+        .branch(PlayerParseBranch(constantParseNode("unlink"), senderPortalParseNode))                                                                          //  portals unlink [name]
+        .branch(PlayerParseBranch(constantParseNode("list")))                                                                                                   //  portals list
         .branch(PermissionParseBranch(permissionListOther, constantParseNode("list"), PARSE_NODE_PLAYER))                                                       //  portals list [player]
         .branch(PermissionParseBranch(permissionInvite, constantParseNode("invite"), senderPortalParseNode, PARSE_NODE_PLAYER))                                 //  portals invite [name] [player]
         .branch(PermissionParseBranch(permissionInviteOther, constantParseNode("invite"), PARSE_NODE_PLAYER, otherPortalParseNode, PARSE_NODE_PLAYER))          //  portals invite [owner] [name] [player]
-        .branch(constantParseNode("invite"), constantParseNode("cancel"), PARSE_NODE_PLAYER, senderInviteParseNode)                                             //  portals invite cancel [player] [name]
-        .branch(constantParseNode("invite"), constantParseNode("accept"), PARSE_NODE_PLAYER, recipientInviteParseNode)                                          //  portals invite accept [player] [name]
-        .branch(constantParseNode("invite"), constantParseNode("decline"), PARSE_NODE_PLAYER, recipientInviteParseNode)                                         //  portals invite decline [player] [name]
+        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("cancel"), PARSE_NODE_PLAYER, senderInviteParseNode))                          //  portals invite cancel [player] [name]
+        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("accept"), PARSE_NODE_PLAYER, recipientInviteParseNode))                       //  portals invite accept [player] [name]
+        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("decline"), PARSE_NODE_PLAYER, recipientInviteParseNode))                      //  portals invite decline [player] [name]
+        .branch(PermissionParseBranch(permissionTp, false, constantParseNode("tp"), senderPortalParseNode))                                                     //  portals tp [name]
+        .branch(PermissionParseBranch(permissionTpOther, false, constantParseNode("tp"), PARSE_NODE_PLAYER, otherPortalParseNode))                              //  portals tp [owner] [name]
+        .branch(PermissionParseBranch(permissionInfo, false, constantParseNode("info"), senderPortalParseNode))                                                 //  portals info [name]
+        .branch(PermissionParseBranch(permissionInfoOther, constantParseNode("info"), PARSE_NODE_PLAYER, otherPortalParseNode))                                 //  portals info [owner] [name]
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw"), PARSE_NODE_DECIMAL))   //  portals edit [name] yaw [number]
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch"), PARSE_NODE_DECIMAL)) //  portals edit [name] pitch [number]
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         when (val result = portalParse.getMatch(args, sender)) {
             is ParseResult.FailResult -> sender.spigot().sendMessage(TextComponent(result.reason))
-            is ParseResult.SuccessResult ->
-                sender.spigot().sendMessage(TextComponent(when(result.match[0] as String) {
+            is ParseResult.SuccessResult -> {
+                val message = when (result.match[0] as String) {
                     "create" -> {
-                        val portal = portalManager.makePortal(sender as Player, result.match[1] as String, sender.location, if (result.match.size == 2) null else result.match[2] as Portal)
-                        if (portal == null) RESULT_ERROR_PORTALEXISTS else RESULT_SUCCESS_NEWPORTAL.format(Locale.ROOT, result.match[1] as String)
+                        val portal = portalManager.makePortal(
+                            sender as Player,
+                            result.match[1] as String,
+                            sender.location,
+                            if (result.match.size == 2) null else result.match[2] as Portal
+                        )
+                        if (portal == null) RESULT_ERROR_PORTALEXISTS else RESULT_SUCCESS_NEWPORTAL.format(
+                            Locale.ROOT,
+                            result.match[1] as String
+                        )
                     }
 
                     "remove" -> {
                         val portal = result.match.last() as Portal
                         portalManager.removePortal(portal)
                         if (result.match.size == 2) RESULT_SUCCESS_DELPORTAL.format(Locale.ROOT, portal.name)
-                        else RESULT_SUCCESS_DELPORTALOTHER.format(Locale.ROOT, portal.name, portal.owner.playerName)
+                        else RESULT_SUCCESS_DELPORTALOTHER.format(
+                            Locale.ROOT,
+                            portal.name,
+                            portal.owner.playerName
+                        )
                     }
 
                     "uninvite" -> {
@@ -142,11 +172,15 @@ class PortalCommand(
 
                         if (toRemove.uniqueId == portal.owner.uniqueId) RESULT_ERROR_BANOWNER
                         else if (!portal.public) {
-                            portal.accessExclusions.remove(toRemove)
+                            portal.removeAccessExclusion(toRemove)
                             RESULT_SUCCESS_BAN.format(toRemove.playerName, portal.name)
                         } else {
-                            portal.accessExclusions.add(toRemove)
-                            RESULT_SUCCESS_BANOTHER.format(toRemove.playerName, portal.name, portal.owner.playerName)
+                            portal.addAccessExclusion(toRemove)
+                            RESULT_SUCCESS_BANOTHER.format(
+                                toRemove.playerName,
+                                portal.name,
+                                portal.owner.playerName
+                            )
                         }
                     }
 
@@ -168,25 +202,34 @@ class PortalCommand(
                         val owner = sender as? OfflinePlayer ?: result.match.last() as OfflinePlayer
                         val portals = portalManager.getPortals(owner)
 
-                        if (portals == null || !portals.iterator().hasNext()) RESULT_ERROR_NOPORTALS
+                        if (portals == null || !portals.iterator().hasNext()) RESULT_ERROR_NOPORTALS.format(owner.playerName)
                         else {
-                            val builder = StringBuilder(RESULT_INFO_LIST)
-                            var counter = 0
-                            for (portal in portals)
-                                builder.append(counter++).append(". ").append(portal.name)
-                            builder.toString()
+                            sender.spigot().sendMessage(TextComponent(RESULT_INFO_LIST.format(owner.playerName)))
+                            for ((counter, portal) in portals.withIndex()) {
+                                val portalLink = portal.getPortalLink(portalManager::getPortal)
+                                sender.spigot().sendMessage(TextComponent("${counter}. ${portal.name}" + if (portalLink == null) "" else " -> ${portalLink.name}"))
+                            }
+                            null
                         }
                     }
 
                     "invite" ->
-                        when(result.match[1]) {
+                        when (result.match[1]) {
                             is Portal, is OfflinePlayer -> {
                                 val recipient = result.match.last() as OfflinePlayer
                                 val portal = result.match[result.match.size - 2] as Portal
 
-                                if (recipient.uniqueId == portal.owner.uniqueId || !portalManager.invitePlayer(recipient, portal)) RESULT_ERROR_INVITED
+                                if (recipient.uniqueId == portal.owner.uniqueId || !portalManager.invitePlayer(
+                                        recipient,
+                                        portal
+                                    )
+                                ) RESULT_ERROR_INVITED.format(recipient.playerName)
                                 else if (sender !is OfflinePlayer || portal.owner.uniqueId != (sender as OfflinePlayer).uniqueId)
-                                    RESULT_SUCCESS_INVITEOTHER.format(recipient.playerName, portal.name, portal.owner.playerName)
+                                    RESULT_SUCCESS_INVITEOTHER.format(
+                                        recipient.playerName,
+                                        portal.name,
+                                        portal.owner.playerName
+                                    )
                                 else RESULT_SUCCESS_INVITE.format(recipient.playerName, portal.name)
                             }
 
@@ -217,8 +260,51 @@ class PortalCommand(
                             else -> RESULT_ERROR_UNKNOWN
                         }
 
+                    "tp" -> {
+                        portalManager.teleportPlayerTo(sender as Player, result.match.last() as Portal)
+                        null
+                    }
+
+                    "info" -> {
+                        val portal = result.match.last() as Portal
+                        val link = portal.getPortalLink(portalManager::getPortal)
+
+                        sender.spigot().sendMessage(TextComponent(RESULT_INFO_PORTAL.format(
+                            portal.name,
+                            portal.world.name,
+                            portal.x,
+                            portal.y,
+                            portal.z,
+                            portal.yaw,
+                            portal.pitch,
+                            if (link == null) RESULT_INFO_PORTAL_UNLINKED else RESULT_INFO_PORTAL_LINKED.format(link.name)
+                        )))
+                        null
+                    }
+
+                    "edit" -> {
+                        val value = result.match.last() as Double
+                        val portal = result.match[result.match.size - 3] as Portal
+
+                        when(result.match[result.match.size - 2] as String) {
+                            "yaw" -> {
+                                portal.yaw = value.toFloat()
+                                RESULT_SUCCESS_EDIT_YAW.format(value)
+                            }
+                            "pitch" -> {
+                                portal.pitch = value.toFloat()
+                                RESULT_SUCCESS_EDIT_PITCH.format(value)
+                            }
+                            else -> RESULT_ERROR_UNKNOWN
+                        }
+                    }
+
                     else -> RESULT_ERROR_UNKNOWN
-                }))
+                }
+
+                if (message != null)
+                    sender.spigot().sendMessage(TextComponent(message))
+            }
         }
 
         return true

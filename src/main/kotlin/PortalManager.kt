@@ -1,13 +1,19 @@
+import net.md_5.bungee.api.chat.TextComponent
+import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.OfflinePlayer
 import org.bukkit.configuration.ConfigurationSection
+import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerMoveEvent
+import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.plugin.Plugin
 import java.lang.Long.max
 import java.util.*
+import java.util.logging.Logger
+import kotlin.collections.HashMap
 
 private const val PATH_DATA_PLAYERS = "players"
 private const val PATH_DATA_WORLDS = "worlds"
@@ -29,6 +35,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     // Player-based list needs to handle random access efficiently, whereas expiry list will always be accessed sequentially
     private val cooldowns = MultiSortedList(ArrayList(), ::LinkedList, COMPARATOR_COOLDOWN_PLAYER, COMPARATOR_COOLDOWN_EXPIRY)
+    private val touchPortalCooldown = HashMap<UUID, Portal>()
 
     private var cooldownTime = DEFAULT_COOLDOWN
 
@@ -50,8 +57,8 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             // Start sequential search at the resulting index if it is populated
             val index = portals.search(COMPARATOR_PORTAL_UID) {
                 compareValues(
-                    { msb } to { it.id.mostSignificantBits.toULong() },
-                    { lsb } to { it.id.leastSignificantBits.toULong() }
+                    { it.id.mostSignificantBits.toULong() } to { msb },
+                    { it.id.leastSignificantBits.toULong() } to { lsb }
                 )
             }
 
@@ -86,20 +93,17 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
         val portalList = ArrayList<Portal>()
         data.getStringList(PATH_DATA_PORTALS).forEach {
-            val portal = readCompressedPortal(it, worlds::getValue, players::getValue) ?: return@forEach
+            val portal = Portal.readCompressedPortal(it, players::getValue, players::getIndex, worlds::getValue, worlds::getIndex)
             portalList += portal
 
             if (portal.id >= nextUUID)
                 nextUUID = portal.id + 1UL
         }
-        portals = MultiSortedList(portalList, ::ArrayList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID)
+        portals = MultiSortedList(portalList, ::ArrayList, COMPARATOR_PORTAL_LOCATION_OWNER, COMPARATOR_PORTAL_UID, COMPARATOR_PORTAL_OWNER_NAME, COMPARATOR_PORTAL_LINKS)
 
         if(portals.isEmpty()) nextUUID = UUID(0, 0)
         else {
-            nextUUID = portals.get(0, COMPARATOR_PORTAL_UID).id + 1UL
-
             // Compute next UUID
-            nextUUID
             nextUUIDUsed = false
         }
 
@@ -114,7 +118,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
     fun save() {
         players.save()
         worlds.save()
-        data.set(PATH_DATA_PORTALS, portals.map { it.toCompressedString(worlds::getIndex, players::getIndex) })
+        data.set(PATH_DATA_PORTALS, portals.map { it.toCompressedString() })
     }
 
     fun onEnable(plugin: Plugin) {
@@ -123,13 +127,14 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     fun onDisable() {
         HandlerList.unregisterAll(this)
+        save()
     }
 
     fun getInvitationsForPlayer(player: OfflinePlayer) =
-        invitations.getAll(COMPARATOR_INVITE_RECIPIENT) { player.uniqueId.compareTo(it.recipient.uniqueId) }
+        invitations.getAll(COMPARATOR_INVITE_RECIPIENT) { it.recipient.uniqueId.compareTo(player.uniqueId) }
 
     fun getInvitationsForPortal(portalID: UUID) =
-        invitations.getAll(COMPARATOR_INVITE_PORTAL) { portalID.compareTo(it.portalID) }
+        invitations.getAll(COMPARATOR_INVITE_PORTAL) { it.portalID.compareTo(portalID) }
 
     fun getInvitationsForPortal(portal: Portal) = getInvitationsForPortal(portal.id)
 
@@ -146,8 +151,8 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     fun invitePlayer(player: OfflinePlayer, portal: Portal): Boolean {
         // Player is already invited or already has a pending invitation
-        if (player in portal.accessExclusions || invitations.search(COMPARATOR_INVITE_RECIPIENT) {
-                compareValues(player::getUniqueId to it.recipient::getUniqueId, portal::id to it::portalID)
+        if (portal.containsAccessExclusion(player) || invitations.search(COMPARATOR_INVITE_RECIPIENT) {
+                compareValues(it.recipient::getUniqueId to player::getUniqueId, it::portalID to portal::id)
         } >= 0)
             return false
 
@@ -159,8 +164,8 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
     fun cancelInvite(player: OfflinePlayer, portal: Portal): Boolean {
         val index = invitations.search(COMPARATOR_INVITE_RECIPIENT) {
             compareValues(
-                player::getUniqueId to it.recipient::getUniqueId,
-                portal::id to it::portalID
+                it.recipient::getUniqueId to player::getUniqueId,
+                it::portalID to portal::id
             )
         }
 
@@ -174,12 +179,12 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         invitations.remove(invite)
 
     private fun acceptInvite0(player: OfflinePlayer, portal: Portal) {
-        if (portal.public) portal.accessExclusions -= player
-        else portal.accessExclusions += player
+        if (portal.public) portal.removeAccessExclusion(player)
+        else portal.addAccessExclusion(player)
     }
 
     fun acceptInvite(player: OfflinePlayer, portal: Portal): Boolean {
-        if (!cancelInvite(player, portal) || (player in portal.accessExclusions != portal.public)) return false
+        if (!cancelInvite(player, portal) || (portal.containsAccessExclusion(player) != portal.public)) return false
 
         acceptInvite0(player, portal)
 
@@ -188,7 +193,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     fun acceptInvite(invite: Invite): Boolean {
         val portal = getPortal(invite.portalID) ?: return false
-        if (!cancelInvite(invite) || (invite.recipient in portal.accessExclusions != portal.public)) return false
+        if (!cancelInvite(invite) || (portal.containsAccessExclusion(invite.recipient) != portal.public)) return false
 
         acceptInvite0(invite.recipient, portal)
 
@@ -201,6 +206,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     fun makePortal(owner: OfflinePlayer, name: String, location: Location, link: Portal? = null): Portal? {
         val portal = Portal(
+            players::getValue, players::getIndex, worlds::getValue, worlds::getIndex,
             nextUUID,
             owner,
             location.world!!,
@@ -209,10 +215,8 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             location.blockZ,
             location.yaw,
             location.pitch,
-            0,
-            link?.id,
             name,
-            SortedList(comparator = COMPARATOR_PLAYER)
+            link
         )
 
         return if (makePortal(portal)) portal else null
@@ -230,8 +234,9 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         invitations.getAll(comparator, comparison)?.forEach(invitations::remove)
 
     fun removePortal(owner: OfflinePlayer, name: String): Boolean {
+        val ownerIndex = players.getIndex(owner)
         val index = portals.search(COMPARATOR_PORTAL_OWNER_NAME) {
-            compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
+            compareValues(it::ownerIndex to { ownerIndex }, it::name to { name })
         }
 
         if (index < 0) return false
@@ -243,10 +248,21 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         // Unlink portals
         portals.getAll(COMPARATOR_PORTAL_LINKS, removed.COMPARISON_PORTAL_LINKEDTO)?.forEach(Portal::unlink)
 
+        onPortalRemove(removed)
+
         return true
     }
 
-    fun removePortal(portal: Portal) = portals.remove(portal)
+    fun removePortal(portal: Portal) {
+        portals.remove(portal)
+        onPortalRemove(portal)
+    }
+
+    private fun onPortalRemove(portal: Portal) {
+        synchronized(touchPortalCooldown) {
+            touchPortalCooldown.values.removeIf(portal::equals)
+        }
+    }
 
     fun getPortal(uuid: UUID): Portal? {
         val index = portals.search(COMPARATOR_PORTAL_UID, uuid.COMPARISON_PORTAL_ID)
@@ -256,7 +272,7 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
 
     fun getPortal(owner: OfflinePlayer, name: String): Portal? {
         val index = portals.search(COMPARATOR_PORTAL_OWNER_NAME) {
-            compareValues(owner::getUniqueId to it.owner::getUniqueId, { name } to it::name)
+            compareValues(it.owner::getUniqueId to owner::getUniqueId, it::name to { name })
         }
 
         if (index < 0) return null
@@ -270,52 +286,70 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
     fun getPortalsByPartialName(owner: OfflinePlayer, namePart: String) =
         portals.getAll(COMPARATOR_PORTAL_OWNER_NAME) {
             compareValues(
-                owner::getUniqueId to it.owner::getUniqueId,
-                { namePart } to { it.name.substring(0, namePart.length.coerceAtMost(it.name.length)) }
+                it.owner::getUniqueId to owner::getUniqueId,
+                { it.name.substring(0, namePart.length.coerceAtMost(it.name.length)) } to { namePart }
             )
         }
 
     fun getPortalsAt(location: Location) =
-        portals.getAll(COMPARATOR_PORTAL_LOCATION_OWNER, location.COMPARISON_PORTAL)
+        portals.getAll(COMPARATOR_PORTAL_LOCATION_OWNER, location.portalComparison(worlds::getIndex))
 
-    private fun popCooldowns() {
+    fun teleportPlayerTo(player: Player, portal: Portal) {
+        val result = portal.enterPortal(player, this::getPortal)
+        if (result is PortalResult.SUCCESS)
+            triggerCooldown(player, result.link)
+        else
+            Logger.getLogger("SpigotPortals")
+                .warning("${player.name} failed to enter portal ${portal.name} (${portal.owner.playerName}; ${portal.world.name}; ${portal.x}, ${portal.y}, ${portal.z})")
+    }
+
+    private fun popCooldowns(player: OfflinePlayer, moveTo: Location) {
         val time = System.currentTimeMillis()
         while (cooldowns.isNotEmpty()) {
             val front = cooldowns.get(0, COMPARATOR_COOLDOWN_EXPIRY)
             if (front.isExpired(time)) cooldowns.removeAt(0, COMPARATOR_COOLDOWN_EXPIRY)
             else break
         }
+
+        if (moveTo.portalComparison(worlds::getIndex)(touchPortalCooldown[player.uniqueId] ?: return) != 0) {
+            touchPortalCooldown.remove(player.uniqueId)
+        }
     }
 
-    private fun isOnCooldown(player: OfflinePlayer): Boolean {
-        popCooldowns()
-        return cooldowns.search(COMPARATOR_COOLDOWN_PLAYER, player.COMPARISON_COOLDOWN) >= 0
+    private fun isOnCooldown(player: OfflinePlayer, moveTo: Location): Boolean {
+        popCooldowns(player, moveTo)
+        return cooldowns.search(COMPARATOR_COOLDOWN_PLAYER, player.COMPARISON_COOLDOWN) >= 0 || player.uniqueId in touchPortalCooldown
     }
 
-    private fun triggerCooldown(player: OfflinePlayer) {
+    private fun triggerCooldown(player: OfflinePlayer, portal: Portal) {
         cooldowns.add(Pair(player, System.currentTimeMillis() + cooldownTime), false)
+        touchPortalCooldown[player.uniqueId] = portal
     }
 
     @EventHandler
     fun onPlayerMove(moveEvent: PlayerMoveEvent) {
-        // If we're ignoring player movements for this player, just return immediately
-        if (isOnCooldown(moveEvent.player)) return
-
-        fun UUID.portalMapper() = portals.firstOrNull { it.id == this }
         val to = moveEvent.to
 
         if (!moveEvent.isCancelled && to != null) {
+            // If we're ignoring player movements for this player, just return immediately
+            if (isOnCooldown(moveEvent.player, to)) return
+
             val found = getPortalsAt(to)
 
-            if ((found?.firstOrNull { it.owner.uniqueId == moveEvent.player.uniqueId }
-                    ?.enterPortal(moveEvent.player, UUID::portalMapper)
-                    ?: found?.firstOrNull {
-                        it.enterPortal(
-                            moveEvent.player,
-                            UUID::portalMapper
-                        ) == PortalResult.SUCCESS
-                    }) != null)
-                triggerCooldown(moveEvent.player)
+            val triggered = found?.firstOrNull {
+                it.owner.uniqueId == moveEvent.player.uniqueId && it.checkEnter(moveEvent.player, this::getPortal) is PortalResult.SUCCESS
+            }
+                ?: found?.firstOrNull { it.checkEnter(moveEvent.player, this::getPortal) is PortalResult.SUCCESS }
+
+            if (triggered != null)
+                teleportPlayerTo(moveEvent.player, triggered)
+        }
+    }
+
+    @EventHandler
+    fun onPlayerDisconnect(disconnectEvent: PlayerQuitEvent) {
+        synchronized(touchPortalCooldown) {
+            touchPortalCooldown.remove(disconnectEvent.player.uniqueId)
         }
     }
 }

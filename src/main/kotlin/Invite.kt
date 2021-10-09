@@ -5,7 +5,7 @@ import java.util.*
 
 private val threadLocalBuffer = ThreadLocal.withInitial { ByteBuffer.allocate(32) }
 
-data class Invite(val recipient: OfflinePlayer, val portalID: UUID) {
+class Invite(val recipient: OfflinePlayer, val portalID: UUID) {
     private constructor(data: Pair<OfflinePlayer, UUID>): this(data.first, data.second)
     constructor(data: String): this(parseData(data))
     constructor(recipient: OfflinePlayer, portal: Portal): this(recipient, portal.id)
