@@ -136,6 +136,8 @@ class PortalCommand(
         .branch(PermissionParseBranch(permissionInfoOther, constantParseNode("info"), PARSE_NODE_PLAYER, otherPortalParseNode))                                 //  portals info [owner] [name]
         .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw"), PARSE_NODE_DECIMAL))   //  portals edit [name] yaw [number]
         .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch"), PARSE_NODE_DECIMAL)) //  portals edit [name] pitch [number]
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw")))                       //  portals edit [name] yaw
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch")))                     //  portals edit [name] pitch
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         when (val result = portalParse.getMatch(args, sender)) {
@@ -261,7 +263,7 @@ class PortalCommand(
                         }
 
                     "tp" -> {
-                        portalManager.teleportPlayerTo(sender as Player, result.match.last() as Portal)
+                        (result.match.last() as Portal).teleportPlayerTo(sender as Player)
                         null
                     }
 
@@ -283,17 +285,20 @@ class PortalCommand(
                     }
 
                     "edit" -> {
-                        val value = result.match.last() as Double
+                        val isExplicit = result.match.last() is Double
+                        val last = if (isExplicit) result.match.last() as Double else null
                         val portal = result.match[result.match.size - 3] as Portal
 
-                        when(result.match[result.match.size - 2] as String) {
+                        sender as Player
+
+                        when(result.match[result.match.lastIndex - (if (isExplicit) 1 else 0)] as String) {
                             "yaw" -> {
-                                portal.yaw = value.toFloat()
-                                RESULT_SUCCESS_EDIT_YAW.format(value)
+                                portal.yaw = if(isExplicit) last!!.toFloat() else sender.location.yaw
+                                RESULT_SUCCESS_EDIT_YAW.format(portal.yaw)
                             }
                             "pitch" -> {
-                                portal.pitch = value.toFloat()
-                                RESULT_SUCCESS_EDIT_PITCH.format(value)
+                                portal.pitch = if(isExplicit) last!!.toFloat() else sender.location.pitch
+                                RESULT_SUCCESS_EDIT_PITCH.format(portal.pitch)
                             }
                             else -> RESULT_ERROR_UNKNOWN
                         }

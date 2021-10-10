@@ -2,7 +2,6 @@ import org.bukkit.Location
 import org.bukkit.OfflinePlayer
 import org.bukkit.World
 import java.util.*
-import kotlin.Comparator
 
 typealias Comparison<V> = (V) -> Int
 typealias Cooldown = Pair<OfflinePlayer, Long>

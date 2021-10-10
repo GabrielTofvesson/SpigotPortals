@@ -1,6 +1,4 @@
 import java.util.*
-import kotlin.Comparator
-import kotlin.collections.ArrayList
 
 class MultiSortedList<E> constructor(
     underlying: MutableList<E>,

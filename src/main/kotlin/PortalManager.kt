@@ -1,5 +1,3 @@
-import net.md_5.bungee.api.chat.TextComponent
-import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.OfflinePlayer
 import org.bukkit.configuration.ConfigurationSection
@@ -13,7 +11,6 @@ import org.bukkit.plugin.Plugin
 import java.lang.Long.max
 import java.util.*
 import java.util.logging.Logger
-import kotlin.collections.HashMap
 
 private const val PATH_DATA_PLAYERS = "players"
 private const val PATH_DATA_WORLDS = "worlds"
