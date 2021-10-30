@@ -125,8 +125,14 @@ class Portal private constructor(
 
     fun getAccessExclusionsSize() = _accessExclusions.size
     fun getAccessExclusion(index: Int) = toPlayerMapper(_accessExclusions[index])
-    fun addAccessExclusion(player: OfflinePlayer) = _accessExclusions.add(fromPlayerMapper(player))
-    fun removeAccessExclusion(player: OfflinePlayer) = _accessExclusions.remove(fromPlayerMapper(player))
+    fun addAccessExclusion(player: OfflinePlayer) {
+        _accessExclusions.add(fromPlayerMapper(player))
+        flags = PortalFlag.NO_EXCLUSIONS.unSetFlag(flags)
+    }
+    fun removeAccessExclusion(player: OfflinePlayer) {
+        _accessExclusions.remove(fromPlayerMapper(player))
+        flags = PortalFlag.NO_EXCLUSIONS.setFlag(flags)
+    }
     fun containsAccessExclusion(player: OfflinePlayer) = fromPlayerMapper(player) in _accessExclusions
 
     val owner: OfflinePlayer
@@ -171,11 +177,13 @@ class Portal private constructor(
 
     fun unlink() {
         link = null
+        flags = PortalFlag.LINKED.unSetFlag(flags)
     }
 
     fun link(portal: Portal): Boolean {
         if (this == portal) return false
         link = portal.id
+        flags = PortalFlag.LINKED.setFlag(flags)
         return true
     }
 
@@ -199,8 +207,8 @@ class Portal private constructor(
         buffer.packedInt = x
         buffer.packedInt = y
         buffer.packedInt = z
-        buffer.putPackedFloat(yaw.mod(360f), 0f, 360f)
-        buffer.putPackedFloat((pitch + 90f).mod(180f) - 90f, -90f, 90f)
+        buffer.packedUInt = yaw.toPackedRotationUInt()
+        buffer.packedUInt = pitch.toPackedPitchUInt()
         buffer.byte = flags
         if (PortalFlag.LINKED.isFlagSet(flags)) {
             val link = link!!
@@ -248,8 +256,8 @@ class Portal private constructor(
                 inputBuffer.packedInt,
                 inputBuffer.packedInt,
                 inputBuffer.packedInt,
-                inputBuffer.getPackedFloat(0f, 360f),
-                inputBuffer.getPackedFloat(0f, 360f),
+                inputBuffer.packedUInt.fromPackedRotationFloat(),
+                inputBuffer.packedUInt.fromPackedPitchFloat(),
                 run {
                     flags = inputBuffer.byte
                     return@run flags

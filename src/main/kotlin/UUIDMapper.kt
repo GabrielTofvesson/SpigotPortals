@@ -66,7 +66,7 @@ open class UUIDMapper<T>(
 }
 
 class PlayerMapper(dataStore: ConfigurationSection, dataStorePath: String): UUIDMapper<OfflinePlayer>(
-    { Bukkit.getServer().getPlayer(this) },
+    { Bukkit.getServer().getOfflinePlayer(this) },
     OfflinePlayer::getUniqueId,
     dataStore,
     dataStorePath

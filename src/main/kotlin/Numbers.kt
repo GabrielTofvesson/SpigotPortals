@@ -4,6 +4,8 @@ import java.math.MathContext
 import java.nio.ByteBuffer
 import java.util.*
 
+private const val ROTATION_COMPRESS_COEFF = 11_930_464.7083
+private const val PITCH_COMPRESS_COEFF = 23_860_929.4167
 internal val ULONG_MAX_INTEGER = BigInteger(byteArrayOf(0, 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte()))
 internal val ULONG_MAX_FLOAT = ULONG_MAX_INTEGER.toBigDecimal(mathContext = MathContext.UNLIMITED)
 
@@ -108,6 +110,11 @@ val Long.varIntSize get() = interlace().varIntSize
 val Int.varIntSize get() = toLong().interlace().varIntSize
 val Short.varIntSize get() = toLong().interlace().varIntSize
 val Char.varIntSize get() = code.varIntSize
+
+fun Float.toPackedRotationUInt() = (ROTATION_COMPRESS_COEFF * mod(360f)).toUInt()
+fun UInt.fromPackedRotationFloat() = (toDouble() / ROTATION_COMPRESS_COEFF).toFloat()
+fun Float.toPackedPitchUInt() = (PITCH_COMPRESS_COEFF * plus(90f).mod(180f)).toUInt()
+fun UInt.fromPackedPitchFloat() = (toDouble() / PITCH_COMPRESS_COEFF).minus(90.0).toFloat()
 
 fun Float.varIntSize(min: Float, max: Float) = toDouble().varIntSize(min.toDouble(), max.toDouble())
 fun Double.varIntSize(min: Double, max: Double) = BigDecimal(this).varIntSize(BigDecimal(min), BigDecimal(max))
