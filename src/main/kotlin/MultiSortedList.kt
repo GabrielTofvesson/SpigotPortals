@@ -112,23 +112,31 @@ class MultiSortedList<E> constructor(
      * Get all contiguous elements that match a comparison
      * @return Iterable object of all matching elements, or null if none exist
      */
-    fun getAll(comparator: Comparator<in E>, comparison: (E) -> Int): Iterable<E>? {
-        var index = search(comparator, comparison)
-        if (index < 0) return null
+    fun getAll(comparator: Comparator<in E>, findBase: (E) -> Int, compare: (E) -> Int): Iterable<E>? {
+        var index = search(comparator, findBase)
+        if (index < 0) {
+            index = -(index + 1)
+
+            if (index >= size || compare(get(index, comparator)) != 0)
+                return null
+        }
+
+        // This should help with accessing entries in sequential collections (e.g. linked lists)
+        val iterator = (extraLists[comparator] ?: this).subList(index, size).iterator()
 
         val result = LinkedList<E>()
-
-        var element: E
-        do {
-            element = get(index++, comparator)
-            if (comparison(element) != 0)
+        while (iterator.hasNext()) {
+            val element = iterator.next()
+            if (compare(element) != 0)
                 break
 
             result += element
-        } while (index < size)
+        }
 
         return result
     }
+
+    fun getAll(comparator: Comparator<in E>, comparison: (E) -> Int) = getAll(comparator, comparison, comparison)
 
     fun findValueOrNull(comparator: Comparator<in E>, comparison: (E) -> Int): E? {
         val index = search(comparator, comparison)

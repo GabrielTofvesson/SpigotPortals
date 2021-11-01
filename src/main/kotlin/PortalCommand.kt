@@ -57,7 +57,8 @@ class PortalCommand(
     permissionTpOther: Permission,
     permissionInfo: Permission,
     permissionInfoOther: Permission,
-    permissionEdit: Permission
+    permissionEdit: Permission,
+    permissionPublish: Permission
 ): CommandExecutor, TabCompleter {
     // Arg parse node for targeting a portal owned by the sender
     private val senderPortalParseNode: ArgNode<Portal> =
@@ -138,6 +139,10 @@ class PortalCommand(
         .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch"), PARSE_NODE_DECIMAL)) //  portals edit [name] pitch [number]
         .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw")))                       //  portals edit [name] yaw
         .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch")))                     //  portals edit [name] pitch
+        .branch(PermissionParseBranch(permissionPublish, false, constantParseNode("publish"), senderPortalParseNode))                                           //  portals publish [name]
+        .branch(PermissionParseBranch(permissionPublish, true, constantParseNode("publish"), PARSE_NODE_PLAYER, otherPortalParseNode))                          //  portals publish [player] [name]
+        .branch(PermissionParseBranch(permissionPublish, false, constantParseNode("unpublish"), senderPortalParseNode))                                         //  portals unpublish [name]
+        .branch(PermissionParseBranch(permissionPublish, true, constantParseNode("unpublish"), PARSE_NODE_PLAYER, otherPortalParseNode))                        //  portals unpublish [player] [name]
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         when (val result = portalParse.getMatch(args, sender)) {
@@ -263,7 +268,7 @@ class PortalCommand(
                         }
 
                     "tp" -> {
-                        (result.match.last() as Portal).teleportPlayerTo(sender as Player)
+                        portalManager.teleportTo(sender as Player, result.match.last() as Portal)
                         null
                     }
 
@@ -287,11 +292,11 @@ class PortalCommand(
                     "edit" -> {
                         val isExplicit = result.match.last() is Double
                         val last = if (isExplicit) result.match.last() as Double else null
-                        val portal = result.match[result.match.size - 3] as Portal
+                        val portal = result.match[1] as Portal
 
                         sender as Player
 
-                        when(result.match[result.match.lastIndex - (if (isExplicit) 1 else 0)] as String) {
+                        when(result.match[2] as String) {
                             "yaw" -> {
                                 portal.yaw = if(isExplicit) last!!.toFloat() else sender.location.yaw
                                 RESULT_SUCCESS_EDIT_YAW.format(portal.yaw)
@@ -301,6 +306,18 @@ class PortalCommand(
                                 RESULT_SUCCESS_EDIT_PITCH.format(portal.pitch)
                             }
                             else -> RESULT_ERROR_UNKNOWN
+                        }
+                    }
+
+                    "publish", "unpublish" -> {
+                        val publish = result.match.first() == "publish"
+                        val portal = result.match.last() as Portal
+
+                        if (portal.public == publish) {
+                            "Nothing changed"
+                        } else {
+                            portal.public = publish
+                            String.format(Locale.ROOT, "Portal \"%s\" is now %s", portal.name, if(publish) "public" else "private")
                         }
                     }
 

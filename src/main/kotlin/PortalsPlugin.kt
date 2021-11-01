@@ -27,7 +27,8 @@ class PortalsPlugin: JavaPlugin() {
             description.permissions.first { it.name == "portals.tp.other" },
             description.permissions.first { it.name == "portals.info" },
             description.permissions.first { it.name == "portals.info.other" },
-            description.permissions.first { it.name == "portals.modify.edit" }
+            description.permissions.first { it.name == "portals.modify.edit" },
+            description.permissions.first { it.name == "portals.modify.publish" }
         )
 
         val pluginCommand = getCommand("portals")!!

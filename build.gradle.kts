@@ -124,6 +124,11 @@ spigot {
             defaults = "op"
         }
 
+        create("portals.modify.publish") {
+            description = "Allows changing the publicity state of portals"
+            defaults = "op"
+        }
+
         create("portals.modify.*") {
             description = "Wildcard portal modification"
             defaults = "op"
@@ -132,7 +137,8 @@ spigot {
                 "portals.modify.edit" to true,
                 "portals.modify.target" to true,
                 "portals.modify.allow" to true,
-                "portals.modify.other" to true
+                "portals.modify.other" to true,
+                "portals.modify.publish" to true
             )
         }
 

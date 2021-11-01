@@ -5,12 +5,14 @@ import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
+import org.bukkit.event.player.PlayerLoginEvent
 import org.bukkit.event.player.PlayerMoveEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.plugin.Plugin
-import java.lang.Long.max
 import java.util.*
 import java.util.logging.Logger
+import kotlin.math.max
+import kotlin.math.min
 
 private const val PATH_DATA_PLAYERS = "players"
 private const val PATH_DATA_WORLDS = "worlds"
@@ -281,23 +283,36 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         portals.getAll(COMPARATOR_PORTAL_OWNER_NAME) { owner.uniqueId.compareTo(it.owner.uniqueId) }
 
     fun getPortalsByPartialName(owner: OfflinePlayer, namePart: String) =
-        portals.getAll(COMPARATOR_PORTAL_OWNER_NAME) {
-            compareValues(
-                it.owner::getUniqueId to owner::getUniqueId,
-                { it.name.substring(0, namePart.length.coerceAtMost(it.name.length)) } to { namePart }
-            )
-        }
+        portals.getAll(COMPARATOR_PORTAL_OWNER_NAME,
+            {
+                compareValues(
+                    it.owner::getUniqueId to owner::getUniqueId,
+                    { it.name } to { namePart }
+                )
+            },
+            {
+                compareValues(
+                    it.owner::getUniqueId to owner::getUniqueId,
+                    { it.name.substring(0 until min(it.name.length, namePart.length)) } to { namePart }
+                )
+            },
+        )
 
     fun getPortalsAt(location: Location) =
         portals.getAll(COMPARATOR_PORTAL_LOCATION_OWNER, location.portalComparison(worlds::getIndex))
 
-    fun teleportPlayerTo(player: Player, portal: Portal) {
+    fun enterPortal(player: Player, portal: Portal) {
         val result = portal.enterPortal(player, this::getPortal)
         if (result is PortalResult.SUCCESS)
             triggerCooldown(player, result.link)
         else
             Logger.getLogger("SpigotPortals")
                 .warning("${player.name} failed to enter portal ${portal.name} (${portal.owner.playerName}; ${portal.world.name}; ${portal.x}, ${portal.y}, ${portal.z})")
+    }
+
+    fun teleportTo(player: Player, portal: Portal) {
+        portal.teleportPlayerTo(player)
+        triggerCooldown(player, portal)
     }
 
     private fun popCooldowns(player: OfflinePlayer, moveTo: Location) {
@@ -323,6 +338,16 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
         touchPortalCooldown[player.uniqueId] = portal
     }
 
+    fun getAccessiblePortals(player: Player, location: Location = player.location) =
+        getPortalsAt(location)?.filter {
+            it.checkEnter(player, this::getPortal) is PortalResult.SUCCESS
+        }
+
+    fun getAccessiblePortal(player: Player, location: Location = player.location): Portal? {
+        val found = getAccessiblePortals(player, location)
+        return found?.firstOrNull { it.owner.uniqueId == player.uniqueId } ?: found?.firstOrNull()
+    }
+
     @EventHandler
     fun onPlayerMove(moveEvent: PlayerMoveEvent) {
         val to = moveEvent.to
@@ -331,15 +356,18 @@ class PortalManager(private val data: ConfigurationSection, private val config: 
             // If we're ignoring player movements for this player, just return immediately
             if (isOnCooldown(moveEvent.player, to)) return
 
-            val found = getPortalsAt(to)
+            enterPortal(moveEvent.player, getAccessiblePortal(moveEvent.player, to) ?: return)
+        }
+    }
 
-            val triggered = found?.firstOrNull {
-                it.owner.uniqueId == moveEvent.player.uniqueId && it.checkEnter(moveEvent.player, this::getPortal) is PortalResult.SUCCESS
+    @EventHandler
+    fun onPlayerJoin(loginEvent: PlayerLoginEvent) {
+        val portal = getAccessiblePortal(loginEvent.player)
+
+        if (portal != null) {
+            synchronized(touchPortalCooldown) {
+                triggerCooldown(loginEvent.player, portal)
             }
-                ?: found?.firstOrNull { it.checkEnter(moveEvent.player, this::getPortal) is PortalResult.SUCCESS }
-
-            if (triggered != null)
-                teleportPlayerTo(moveEvent.player, triggered)
         }
     }
 
