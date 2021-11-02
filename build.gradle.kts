@@ -109,7 +109,7 @@ spigot {
             defaults = "true"
         }
 
-        create("portals.modify.target") {
+        create("portals.modify.link") {
             description = "Allows targeting/un-targeting a portal as a destination"
             defaults = "true"
         }
@@ -135,7 +135,7 @@ spigot {
             children = mapOf(
                 "portals.modify.remove" to true,
                 "portals.modify.edit" to true,
-                "portals.modify.target" to true,
+                "portals.modify.link" to true,
                 "portals.modify.allow" to true,
                 "portals.modify.other" to true,
                 "portals.modify.publish" to true
