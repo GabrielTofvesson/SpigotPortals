@@ -17,6 +17,7 @@ private const val RESULT_ERROR_NOPORTALS = "%s has no portals"
 private const val RESULT_ERROR_INVITED = "%s is already invited"
 private const val RESULT_ERROR_BANOWNER = "Cannot ban portal owner"
 private const val RESULT_ERROR_UNKNOWN = "An unknown error occurred"
+private const val RESULT_ERROR_NOCHANGE = "Nothing changed"
 
 private const val RESULT_SUCCESS_NEWPORTAL = "Created portal \"%s\""
 private const val RESULT_SUCCESS_DELPORTAL = "Removed portal \"%s\""
@@ -34,9 +35,13 @@ private const val RESULT_SUCCESS_TP = "Teleported to portal \"%s\""
 private const val RESULT_SUCCESS_TPO = "Teleported to portal \"%s\", owned by %s"
 private const val RESULT_SUCCESS_EDIT_YAW = "Set yaw to %f degrees"
 private const val RESULT_SUCCESS_EDIT_PITCH = "Set pitch to %f degrees"
+private const val RESULT_SUCCESS_PUBLISH = "Portal \"%s\" is now %s"
+
+private const val PUBLICITY_PUBLISH = "public"
+private const val PUBLICITY_UNPUBLISH = "private"
 
 private const val RESULT_INFO_LIST = "List of portals owned by %s:"
-private const val RESULT_INFO_PORTAL = "Portal \"%s\" (%s; %d, %d, %d; %f, %f) (%s)"
+private const val RESULT_INFO_PORTAL = "Portal \"%s\" (%s; %d, %d, %d; %f, %f) (%s, %s)"
 private const val RESULT_INFO_PORTAL_LINKED = "Linked to \"%s\""
 private const val RESULT_INFO_PORTAL_UNLINKED = "Un-linked"
 
@@ -58,7 +63,8 @@ class PortalCommand(
     permissionInfo: Permission,
     permissionInfoOther: Permission,
     permissionEdit: Permission,
-    permissionPublish: Permission
+    permissionPublish: Permission,
+    permissionLink: Permission
 ): CommandExecutor, TabCompleter {
     // Arg parse node for targeting a portal owned by the sender
     private val senderPortalParseNode: ArgNode<Portal> =
@@ -116,33 +122,33 @@ class PortalCommand(
         }
 
     private val portalParse = ParseTree()
-        .branch(PermissionParseBranch(permissionCreate, false, constantParseNode("create"), PARSE_NODE_STRING, senderPortalParseNode))                          //  portals create [name] [linkName]
-        .branch(PermissionParseBranch(permissionCreate, false, constantParseNode("create"), PARSE_NODE_STRING))                                                 //  portals create [name]
-        .branch(PermissionParseBranch(permissionRemove, false, constantParseNode("remove"), senderPortalParseNode))                                             //  portals remove [name]
-        .branch(PermissionParseBranch(permissionRemoveOther, constantParseNode("remove"), PARSE_NODE_PLAYER, otherPortalParseNode))                             //  portals remove [player] [name]
-        .branch(PlayerParseBranch(constantParseNode("uninvite"), senderPortalParseNode, PARSE_NODE_PLAYER))                                                     //  portals uninvite [name] [player]
-        .branch(PermissionParseBranch(permissionInviteOther, false, constantParseNode("uninvite"), PARSE_NODE_PLAYER, otherPortalParseNode, PARSE_NODE_PLAYER)) //  portals uninvite [owner] [name] [player]
-        .branch(PlayerParseBranch(constantParseNode("link"), senderPortalParseNode, senderPortalParseNode))                                                     //  portals link [name] [linkName]
-        .branch(PlayerParseBranch(constantParseNode("unlink"), senderPortalParseNode))                                                                          //  portals unlink [name]
-        .branch(PlayerParseBranch(constantParseNode("list")))                                                                                                   //  portals list
-        .branch(PermissionParseBranch(permissionListOther, constantParseNode("list"), PARSE_NODE_PLAYER))                                                       //  portals list [player]
-        .branch(PermissionParseBranch(permissionInvite, constantParseNode("invite"), senderPortalParseNode, PARSE_NODE_PLAYER))                                 //  portals invite [name] [player]
-        .branch(PermissionParseBranch(permissionInviteOther, constantParseNode("invite"), PARSE_NODE_PLAYER, otherPortalParseNode, PARSE_NODE_PLAYER))          //  portals invite [owner] [name] [player]
-        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("cancel"), PARSE_NODE_PLAYER, senderInviteParseNode))                          //  portals invite cancel [player] [name]
-        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("accept"), PARSE_NODE_PLAYER, recipientInviteParseNode))                       //  portals invite accept [player] [name]
-        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("decline"), PARSE_NODE_PLAYER, recipientInviteParseNode))                      //  portals invite decline [player] [name]
-        .branch(PermissionParseBranch(permissionTp, false, constantParseNode("tp"), senderPortalParseNode))                                                     //  portals tp [name]
-        .branch(PermissionParseBranch(permissionTpOther, false, constantParseNode("tp"), PARSE_NODE_PLAYER, otherPortalParseNode))                              //  portals tp [owner] [name]
-        .branch(PermissionParseBranch(permissionInfo, false, constantParseNode("info"), senderPortalParseNode))                                                 //  portals info [name]
-        .branch(PermissionParseBranch(permissionInfoOther, constantParseNode("info"), PARSE_NODE_PLAYER, otherPortalParseNode))                                 //  portals info [owner] [name]
-        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw"), PARSE_NODE_DECIMAL))   //  portals edit [name] yaw [number]
-        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch"), PARSE_NODE_DECIMAL)) //  portals edit [name] pitch [number]
-        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw")))                       //  portals edit [name] yaw
-        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch")))                     //  portals edit [name] pitch
-        .branch(PermissionParseBranch(permissionPublish, false, constantParseNode("publish"), senderPortalParseNode))                                           //  portals publish [name]
-        .branch(PermissionParseBranch(permissionPublish, true, constantParseNode("publish"), PARSE_NODE_PLAYER, otherPortalParseNode))                          //  portals publish [player] [name]
-        .branch(PermissionParseBranch(permissionPublish, false, constantParseNode("unpublish"), senderPortalParseNode))                                         //  portals unpublish [name]
-        .branch(PermissionParseBranch(permissionPublish, true, constantParseNode("unpublish"), PARSE_NODE_PLAYER, otherPortalParseNode))                        //  portals unpublish [player] [name]
+        .branch(PermissionParseBranch(permissionCreate, false, constantParseNode("create"), PARSE_NODE_STRING, senderPortalParseNode))                                              //  portals create [name] [linkName]
+        .branch(PermissionParseBranch(permissionCreate, false, constantParseNode("create"), PARSE_NODE_STRING))                                                                     //  portals create [name]
+        .branch(PRIORITY_MAX, PermissionParseBranch(permissionRemove, false, constantParseNode("remove"), senderPortalParseNode))                                                   //  portals remove [name]
+        .branch(PermissionParseBranch(permissionRemoveOther, constantParseNode("remove"), PARSE_NODE_PLAYER, otherPortalParseNode))                                                 //  portals remove [player] [name]
+        .branch(PRIORITY_MAX, PlayerParseBranch(constantParseNode("uninvite"), senderPortalParseNode, PARSE_NODE_PLAYER))                                                           //  portals uninvite [name] [player]
+        .branch(PermissionParseBranch(permissionInviteOther, false, constantParseNode("uninvite"), PARSE_NODE_PLAYER, otherPortalParseNode, PARSE_NODE_PLAYER))                     //  portals uninvite [owner] [name] [player]
+        .branch(PermissionParseBranch(permissionLink, false, constantParseNode("link"), senderPortalParseNode, senderPortalParseNode))                                              //  portals link [name] [linkName]
+        .branch(PermissionParseBranch(permissionLink, false, constantParseNode("unlink"), senderPortalParseNode))                                                                   //  portals unlink [name]
+        .branch(PlayerParseBranch(constantParseNode("list")))                                                                                                                       //  portals list
+        .branch(PermissionParseBranch(permissionListOther, constantParseNode("list"), PARSE_NODE_PLAYER))                                                                           //  portals list [player]
+        .branch(PRIORITY_MAX, PermissionParseBranch(permissionInvite, constantParseNode("invite"), constantParseNode("create"), senderPortalParseNode, PARSE_NODE_PLAYER))          //  portals invite [name] [player]
+        .branch(PermissionParseBranch(permissionInviteOther, constantParseNode("invite"), constantParseNode("create"), PARSE_NODE_PLAYER, otherPortalParseNode, PARSE_NODE_PLAYER)) //  portals invite [owner] [name] [player]
+        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("cancel"), PARSE_NODE_PLAYER, senderInviteParseNode))                                              //  portals invite cancel [player] [name]
+        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("accept"), PARSE_NODE_PLAYER, recipientInviteParseNode))                                           //  portals invite accept [player] [name]
+        .branch(PlayerParseBranch(constantParseNode("invite"), constantParseNode("decline"), PARSE_NODE_PLAYER, recipientInviteParseNode))                                          //  portals invite decline [player] [name]
+        .branch(PRIORITY_MAX, PermissionParseBranch(permissionTp, false, constantParseNode("tp"), senderPortalParseNode))                                                           //  portals tp [name]
+        .branch(PermissionParseBranch(permissionTpOther, false, constantParseNode("tp"), PARSE_NODE_PLAYER, otherPortalParseNode))                                                  //  portals tp [owner] [name]
+        .branch(PRIORITY_MAX, PermissionParseBranch(permissionInfo, false, constantParseNode("info"), senderPortalParseNode))                                                       //  portals info [name]
+        .branch(PermissionParseBranch(permissionInfoOther, constantParseNode("info"), PARSE_NODE_PLAYER, otherPortalParseNode))                                                     //  portals info [owner] [name]
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw"), PARSE_NODE_DECIMAL))                       //  portals edit [name] yaw [number]
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch"), PARSE_NODE_DECIMAL))                     //  portals edit [name] pitch [number]
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("yaw")))                                           //  portals edit [name] yaw
+        .branch(PermissionParseBranch(permissionEdit, false, constantParseNode("edit"), senderPortalParseNode, constantParseNode("pitch")))                                         //  portals edit [name] pitch
+        .branch(PRIORITY_MAX, PermissionParseBranch(permissionPublish, false, constantParseNode("publish"), senderPortalParseNode))                                                 //  portals publish [name]
+        .branch(PermissionParseBranch(permissionPublish, true, constantParseNode("publish"), PARSE_NODE_PLAYER, otherPortalParseNode))                                              //  portals publish [player] [name]
+        .branch(PRIORITY_MAX, PermissionParseBranch(permissionPublish, false, constantParseNode("unpublish"), senderPortalParseNode))                                               //  portals unpublish [name]
+        .branch(PermissionParseBranch(permissionPublish, true, constantParseNode("unpublish"), PARSE_NODE_PLAYER, otherPortalParseNode))                                            //  portals unpublish [player] [name]
 
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         when (val result = portalParse.getMatch(args, sender)) {
@@ -276,7 +282,7 @@ class PortalCommand(
                         val portal = result.match.last() as Portal
                         val link = portal.getPortalLink(portalManager::getPortal)
 
-                        sender.spigot().sendMessage(TextComponent(RESULT_INFO_PORTAL.format(
+                        RESULT_INFO_PORTAL.format(
                             portal.name,
                             portal.world.name,
                             portal.x,
@@ -284,9 +290,9 @@ class PortalCommand(
                             portal.z,
                             portal.yaw,
                             portal.pitch,
-                            if (link == null) RESULT_INFO_PORTAL_UNLINKED else RESULT_INFO_PORTAL_LINKED.format(link.name)
-                        )))
-                        null
+                            if (link == null) RESULT_INFO_PORTAL_UNLINKED else RESULT_INFO_PORTAL_LINKED.format(link.name),
+                            if (portal.public) PUBLICITY_PUBLISH else PUBLICITY_UNPUBLISH
+                        )
                     }
 
                     "edit" -> {
@@ -314,10 +320,10 @@ class PortalCommand(
                         val portal = result.match.last() as Portal
 
                         if (portal.public == publish) {
-                            "Nothing changed"
+                            RESULT_ERROR_NOCHANGE
                         } else {
                             portal.public = publish
-                            String.format(Locale.ROOT, "Portal \"%s\" is now %s", portal.name, if(publish) "public" else "private")
+                            String.format(Locale.ROOT, RESULT_SUCCESS_PUBLISH, portal.name, if(publish) PUBLICITY_PUBLISH else PUBLICITY_UNPUBLISH)
                         }
                     }
 

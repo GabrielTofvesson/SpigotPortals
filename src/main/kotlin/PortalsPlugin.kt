@@ -17,18 +17,19 @@ class PortalsPlugin: JavaPlugin() {
 
         val command = PortalCommand(
             portalManager,
-            description.permissions.first { it.name == "portals.create" },
-            description.permissions.first { it.name == "portals.modify.remove" },
-            description.permissions.first { it.name == "portals.modify.other" },
-            description.permissions.first { it.name == "portals.invite" },
-            description.permissions.first { it.name == "portals.invite.other" },
-            description.permissions.first { it.name == "portals.list.other" },
-            description.permissions.first { it.name == "portals.tp" },
-            description.permissions.first { it.name == "portals.tp.other" },
-            description.permissions.first { it.name == "portals.info" },
-            description.permissions.first { it.name == "portals.info.other" },
-            description.permissions.first { it.name == "portals.modify.edit" },
-            description.permissions.first { it.name == "portals.modify.publish" }
+            getPermission("portals.create")!!,
+            getPermission("portals.modify.remove")!!,
+            getPermission("portals.modify.other")!!,
+            getPermission("portals.invite")!!,
+            getPermission("portals.invite.other")!!,
+            getPermission("portals.list.other")!!,
+            getPermission("portals.tp")!!,
+            getPermission("portals.tp.other")!!,
+            getPermission("portals.info")!!,
+            getPermission("portals.info.other")!!,
+            getPermission("portals.modify.edit")!!,
+            getPermission("portals.modify.publish")!!,
+            getPermission("portals.modify.link")!!,
         )
 
         val pluginCommand = getCommand("portals")!!
