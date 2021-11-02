@@ -3,6 +3,7 @@ import org.bukkit.OfflinePlayer
 import org.bukkit.command.CommandSender
 import org.bukkit.permissions.Permission
 import java.util.*
+import kotlin.collections.LinkedHashMap
 
 const val RESULT_ERROR_NOMATCH = "Unknown command"
 const val RESULT_ERROR_NOPERMS = "You don't have permission to use this command"
@@ -130,23 +131,31 @@ sealed class NodeParseResult<T> {
     data class SuccessResult<T>(val match: T): NodeParseResult<T>()
 }
 
-class ParseTree {
-    private val branches = LinkedList<ParseBranch>()
+const val PRIORITY_MAX = Int.MIN_VALUE
+const val PRIORITY_MED = 0
+const val PRIORITY_MIN = Int.MAX_VALUE
 
-    fun branch(vararg nodes: ArgNode<*>) = branch(ParseBranch(*nodes))
-    fun branch(parseBranch: ParseBranch): ParseTree {
-        branches += parseBranch
+class ParseTree {
+    private val branches = LinkedHashMap<ParseBranch, Int>()
+
+    fun branch(vararg nodes: ArgNode<*>) = branch(PRIORITY_MED, *nodes)
+    fun branch(parseBranch: ParseBranch) = branch(PRIORITY_MED, parseBranch)
+    fun branch(priority: Int, vararg nodes: ArgNode<*>) = branch(priority, ParseBranch(*nodes))
+    fun branch(priority: Int, parseBranch: ParseBranch): ParseTree {
+        branches[parseBranch] = priority
         return this
     }
 
     fun getSuggestions(args: Array<out String>, sender: CommandSender) =
-        branches.filter { it.isEligible(sender) }
-            .mapNotNull { it.getSuggestions(args, sender) }
+        branches.filter { (k, _) -> k.isEligible(sender) }
+            .mapNotNull { (k, v) -> (k.getSuggestions(args, sender) ?: return@mapNotNull null) to v }
+            .sortedBy { (_, v) -> v }
+            .map(Pair<List<String>, *>::first)
             .flatten()
             .toHashSet()
 
     fun getMatch(args: Array<out String>, sender: CommandSender): ParseResult {
-        branches.forEach {
+        branches.keys.forEach {
             if (it.isEligible(sender)) {
                 val match = it.match(args, sender)
                 if (match != null) return ParseResult.SuccessResult(match, it)
