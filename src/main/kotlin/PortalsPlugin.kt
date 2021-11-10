@@ -42,6 +42,8 @@ class PortalsPlugin: JavaPlugin() {
         val pluginCommand = getCommand("portals")!!
         pluginCommand.tabCompleter = command
         pluginCommand.setExecutor(command)
+
+        startAutoSaver()
     }
 
     override fun reloadConfig() {
@@ -52,14 +54,19 @@ class PortalsPlugin: JavaPlugin() {
         portalManager.reload()
     }
 
-    private fun startAutoSaver() {
+    private fun cancelAutoSaver() {
         val task = autoSaveTask
         if (task != null) {
             Bukkit.getScheduler().cancelTask(task.taskId)
+            autoSaveTask = null
         }
+    }
+
+    private fun startAutoSaver() {
+        if (autoSaveTask != null)
+            cancelAutoSaver()
 
         val interval = config.getLong(PATH_AUTOSAVE, AUTOSAVE_DEFAULT)
-
         autoSaveTask = Bukkit.getScheduler().runTaskTimer(
             this,
             Runnable {
@@ -75,6 +82,8 @@ class PortalsPlugin: JavaPlugin() {
 
     override fun onDisable() {
         super.onDisable()
+
+        cancelAutoSaver()
 
         portalManager.onDisable()
 
