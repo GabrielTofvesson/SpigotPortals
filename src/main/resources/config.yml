@@ -1,2 +1,3 @@
 chunkLoadDestination: true
+autoSaveMinutesInterval: 240
 playerTeleportCooldownTicks: 100
